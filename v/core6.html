@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="icon" href="data:,">
+<title>Braindump — core6 · Recording drop</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#000;color:#8A8A8A;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+.phone{position:relative;width:390px;height:844px;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+@media (max-width:500px){.phone{width:100vw;height:100vh;height:100dvh}}
+canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-action:none}
+#msg{position:absolute;left:0;right:0;top:60%;text-align:center;font-size:13px;letter-spacing:.02em;color:#8A8A8A;opacity:0;transition:opacity .4s;pointer-events:none}
+#msg.on{opacity:1}
+#mic{position:absolute;left:0;right:0;bottom:24px;text-align:center;font-size:11px;color:#444;display:none;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+  <canvas id="gl"></canvas>
+  <div id="msg"></div>
+  <div id="mic">mic off</div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const TAU = Math.PI * 2, PH = $('#phone'), MSG = $('#msg'), MIC = $('#mic');
+const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
+const FS = `precision highp float;
+uniform vec2 uRes;uniform float uDpr,uRim,uGR;uniform vec2 uLD;uniform vec4 uB[40];
+void main(){
+  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
+  float f=0.;vec2 G=vec2(0.);
+  for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float r2=b.z*b.z;f+=r2/d2;G-=2.*r2*dv/(d2*d2);}
+  float gn=max(length(G),1e-4);
+  float sd=(f-1.)/gn;
+  float m=smoothstep(-.7,.7,sd);
+  float og=exp(-max(-sd,0.)/uGR);
+  float edge=1.-smoothstep(1.,1.8,f);
+  vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
+  vec3 Lv=normalize(vec3(uLD*.6,.8)),Hv=normalize(Lv+vec3(0.,0.,1.));
+  float side=max(dot(N.xy,uLD),0.);
+  float rim=edge*edge*uRim*(.6+1.2*side*side);
+  float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge;
+  float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08;
+  gl_FragColor=vec4(vec3(c),1.);
+}`;
+
+let W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
+let lvl = 0, avg = 0, rimS = .45, grS = 18, rv = 0;
+let rec = false, recId = null, recT0 = 0, shown = -1, drop = null, lastOnset = -1e9, warned = false;
+let micState = 'idle', an = null, ctxA = null, tbuf = null, freq = null;
+const sc = {x:1, v:0, t:1};
+const BS = [0, 0, 0, 0, 0, 0], BO = [0, 0, 0, 0, 0, 0], ST = [0, 0, 0, 0, 0, 0];
+const RIP = [];
+const QX = {p:0, v:0}, QY = {p:0, v:0};
+let PX = 0, PY = 0, lastIn = -1e9, LD = [1, 0], LT = [1, 0];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+function makeView() {
+  const cv = document.getElementById('gl'), g = cv.getContext('webgl', {alpha:false, antialias:false});
+  const v = {cv, gl:g, L:{}, B:new Float32Array(160)};
+  if (!g) return v;
+  const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); return o; };
+  const pr = g.createProgram();
+  g.attachShader(pr, sh(g.VERTEX_SHADER, VS)); g.attachShader(pr, sh(g.FRAGMENT_SHADER, FS));
+  g.linkProgram(pr); g.useProgram(pr);
+  g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
+  g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+  const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
+  ['uRes','uDpr','uRim','uGR','uB','uLD'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  return v;
+}
+const HV = makeView();
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2); W = PH.clientWidth; H = PH.clientHeight;
+  HV.cv.width = Math.round(W * DPR); HV.cv.height = Math.round(H * DPR);
+  HV.cv.style.width = W + 'px'; HV.cv.style.height = H + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// microphone: one getUserMedia on first press of the core; fake level as fallback
+function startMic() {
+  if (micState !== 'idle') return;
+  micState = 'pending';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micState = 'off'; MIC.style.display = 'block'; return; }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(st => {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctxA = new AC();
+    an = ctxA.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = .8;
+    ctxA.createMediaStreamSource(st).connect(an);
+    tbuf = new Float32Array(an.fftSize); freq = new Uint8Array(an.frequencyBinCount);
+    micState = 'on';
+  }).catch(() => { micState = 'off'; MIC.style.display = 'block'; });
+}
+function micLevels() {
+  an.getFloatTimeDomainData(tbuf);
+  let s = 0; for (let i = 0; i < tbuf.length; i++) s += tbuf[i] * tbuf[i];
+  const rms = Math.sqrt(s / tbuf.length), gate = rms < .02;
+  const L = gate ? 0 : Math.sqrt(Math.min(1, rms / .3));
+  an.getByteFrequencyData(freq);
+  const hz = ctxA.sampleRate / an.fftSize, out = [];
+  for (let k = 0; k < 6; k++) {
+    const i0 = Math.max(1, Math.floor(80 * Math.pow(50, k / 6) / hz)), i1 = Math.max(i0, Math.min(freq.length - 1, Math.ceil(80 * Math.pow(50, (k + 1) / 6) / hz)));
+    let sum = 0; for (let i = i0; i <= i1; i++) sum += freq[i];
+    out.push(gate ? 0 : Math.min(1, Math.sqrt(sum / (i1 - i0 + 1) / 255) * 1.4));
+  }
+  return {lvl:L, bands:out};
+}
+
+// recording
+function startRec() {
+  rec = true; recT0 = performance.now(); shown = -1; sc.t = 1.15; drop = null;
+  MSG.classList.add('on');
+  startMic();
+}
+function stopRec() {
+  rec = false; sc.t = 1; drop = {t0:performance.now()};
+  MSG.classList.remove('on');
+}
+function spring(s, dt) {
+  const a = (s.t - s.x) * 70 - s.v * 12.5;
+  s.v += a * dt; s.x += s.v * dt;
+}
+function springXY(s, tg, k, c, dt) { const a = (tg - s.p) * k - s.v * c; s.v += a * dt; s.p += s.v * dt; }
+
+const pt = e => { const r = PH.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
+PH.addEventListener('pointerdown', e => {
+  const p = pt(e);
+  if (!rec && Math.hypot(p.x - W / 2, p.y - H * .8) < 90) { startRec(); recId = e.pointerId; }
+});
+window.addEventListener('pointermove', e => { const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now(); });
+window.addEventListener('pointerup', e => { if (rec && e.pointerId === recId) stopRec(); });
+window.addEventListener('pointercancel', e => { if (rec && e.pointerId === recId) stopRec(); });
+
+function draw(cx, cy) {
+  const g = HV.gl; if (!g) return;
+  const L = HV.L;
+  if (!warned && L.uLD === null) { console.log('uLD uniform not found'); warned = true; }
+  g.viewport(0, 0, HV.cv.width, HV.cv.height);
+  g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
+  g.uniform1f(L.uRim, rimS); g.uniform1f(L.uGR, grS);
+  g.uniform2f(L.uLD, LD[0], LD[1]);
+  g.uniform4fv(L.uB, HV.B);
+  g.drawArrays(g.TRIANGLES, 0, 3);
+}
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 1 / 30); last = now; T += dt;
+  spring(sc, dt);
+  br = .5 - .5 * Math.cos(T * TAU / 5);
+  const hold = rec;
+
+  // level: real mic when on, fake level otherwise
+  let vt = 0, bt = [0, 0, 0, 0, 0, 0];
+  if (rec) {
+    if (micState === 'on') { const a = micLevels(); vt = a.lvl; bt = a.bands; }
+    else {
+      vt = clamp(.5 + .5 * (.55 * Math.sin(T * 1.7) + .3 * Math.sin(T * 3.9 + 1.3) + .15 * Math.sin(T * 7.3) + (Math.random() * 2 - 1) * .3), 0, 1);
+      bt = bt.map((_, k) => .5 + .5 * Math.sin(T * (2 + .4 * k) + k * 2.3));
+    }
+  }
+  lvl += (vt - lvl) * Math.min(1, dt * 6);
+  avg += (lvl - avg) * Math.min(1, dt / .3);
+  for (let k = 0; k < 6; k++) BS[k] += (bt[k] - BS[k]) * .08;
+  rv += ((rec ? 1 : 0) - rv) * Math.min(1, dt * 4);
+  rimS += ((rec ? .6 + .4 * lvl : .45 + .15 * br) - rimS) * .12;
+  grS += ((18 + 16 * lvl * rv) - grS) * .12;
+  if (rec) {
+    const s = Math.floor((now - recT0) / 1000);
+    if (s !== shown) { shown = s; MSG.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+    // onset ripple: level jumps above its 300ms average
+    if (lvl > avg + .12 && now - lastOnset > 150 && RIP.length < 3) { lastOnset = now; RIP.push({a0:Math.random() * TAU, t0:now}); }
+  }
+  for (let i = RIP.length - 1; i >= 0; i--) if (now - RIP[i].t0 > 700) RIP.splice(i, 1);
+
+  // pull toward pointer while holding: offset clamped 48px, spring 60/12
+  let tx = 0, ty = 0;
+  if (hold) {
+    const dx = PX - W / 2, dy = PY - H * .8, d = Math.hypot(dx, dy) || 1, sc2 = Math.min(1, 48 / d);
+    tx = dx * sc2; ty = dy * sc2;
+  }
+  springXY(QX, tx, 60, 12, dt); springXY(QY, ty, 60, 12, dt);
+  const cx = W / 2 + QX.p, cy = H * .8 + QY.p, R = 72 * sc.x * (1 + .025 * (2 * br - 1));
+
+  // light: unit vector toward pointer; orbit after 3s without input
+  if (now - lastIn < 3000) { const dx = PX - cx, dy = PY - cy, d = Math.hypot(dx, dy) || 1; LT = [dx / d, dy / d]; }
+  else LT = [Math.cos(T * TAU / 20), Math.sin(T * TAU / 20)];
+  LD[0] += (LT[0] - LD[0]) * .1; LD[1] += (LT[1] - LD[1]) * .1;
+  const ll = Math.hypot(LD[0], LD[1]) || 1; LD[0] /= ll; LD[1] /= ll;
+
+  // drop: 6 band lobes (max .22R), stretch toward pointer, 3 ripples (2 balls each); idle orbit drift +30%
+  const hb = [[cx, cy, R * .55 * (1 + .1 * Math.sin(T * 1.1)), 0]];
+  const kn = hold ? ((Math.round(Math.atan2(PY - cy, PX - cx) / (TAU / 6)) % 6) + 6) % 6 : -1;
+  for (let k = 0; k < 6; k++) {
+    BO[k] += ((hold ? 0 : 0) - BO[k]) * 0;
+    ST[k] += ((k === kn ? .25 * R : 0) - ST[k]) * .1;
+    const a = k * TAU / 6, dd = .2 * R + BS[k] * .22 * R * rv + ST[k];
+    hb.push([cx + Math.cos(a) * dd, cy + Math.sin(a) * dd, .3 * R * rv, 0]);
+    hb.push([cx + Math.cos(a) * .5 * R, cy + Math.sin(a) * .5 * R, .25 * R * rv, 0]);
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = TAU * T / (9 + i * 1.7) + i * TAU / 4, rad = Math.min(R * .55, R * (.45 + .1 * br) * 1.3);
+    hb.push([cx + Math.cos(a) * rad, cy + Math.sin(a * 1.2 + i) * rad * .75, (1 - rv) * R * .34 * (1 + .04 * Math.sin(T * 1.3 + i * 2)), 0]);
+  }
+  for (const r of RIP) {
+    const age = (now - r.t0) / 700, s = Math.max(0, 1 - age);
+    for (const dir of [-1, 1]) {
+      const a = r.a0 + dir * age * 1.6, dd = .55 * R + .08 * R * s;
+      hb.push([cx + Math.cos(a) * dd, cy + Math.sin(a) * dd, (.04 + .08 * s) * R, 0]);
+    }
+  }
+
+  // release: droplet pinches off the top (300ms), then rises 180px over 1.4s while shrinking
+  if (drop) {
+    const e = performance.now() - drop.t0;
+    if (e < 300) hb.push([cx, cy - R * (.55 + .4 * e / 300), 10, 0]);
+    else {
+      const u = (e - 300) / 1400;
+      if (u >= 1) drop = null;
+      else hb.push([cx, cy - R * .95 - 180 * (1 - Math.pow(1 - u, 3)), 10 * (1 - u), 0]);
+    }
+  }
+  HV.B.fill(0); hb.forEach((b, k) => HV.B.set(b, k * 4));
+  draw(cx, cy);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

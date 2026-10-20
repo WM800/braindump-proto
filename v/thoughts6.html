@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="icon" href="data:,">
+<title>Braindump — thoughts6 · Recent thoughts</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#000;color:#8A8A8A;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+.phone{position:relative;width:390px;height:844px;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+@media (max-width:500px){.phone{width:100vw;height:100vh;height:100dvh}}
+canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-action:none}
+#hint{position:absolute;left:0;right:0;top:48px;text-align:center;font-size:11px;color:#333;opacity:0;transition:opacity 1s;pointer-events:none}
+#hint.on{opacity:1}
+#note{position:absolute;left:0;top:0;max-width:220px;font-size:13px;line-height:1.35;color:#9A9A9A;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+#note.on{opacity:1}
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+  <canvas id="gl"></canvas>
+  <div id="hint">double-tap to hide thoughts</div>
+  <div id="note"></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const TAU = Math.PI * 2, PH = $('#phone'), HINT = $('#hint'), NOTE = $('#note');
+const TEXTS = ['Call mom back', 'Idea: light as material', 'Buy oat milk', 'Garden: tomatoes on the south', 'Dentist on the 28th', 'Lease renewal Friday', "Grandpa's boat story"];
+const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
+const FS = `precision highp float;
+uniform vec2 uRes;uniform float uDpr,uRim,uGR;uniform vec4 uB[40];uniform vec4 uM[14];
+void main(){
+  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
+  float f=0.;vec2 G=vec2(0.);
+  for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float r2=b.z*b.z;f+=r2/d2;G-=2.*r2*dv/(d2*d2);}
+  float gn=max(length(G),1e-4);
+  float sd=(f-1.)/gn;
+  float m=smoothstep(-.7,.7,sd);
+  float og=exp(-max(-sd,0.)/uGR);
+  float edge=1.-smoothstep(1.,1.8,f);
+  vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
+  vec3 Lv=normalize(vec3(-.4,-.6,.7)),Hv=normalize(Lv+vec3(0.,0.,1.));
+  float rim=edge*edge*uRim;
+  float sp=pow(max(dot(N,Hv),0.),120.)*.35*edge;
+  float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08;
+  float f2=0.,w2=0.;
+  for(int i=0;i<14;i++){vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float c2=b.z*b.z/max(dot(dv,dv),1.);f2+=c2;w2+=c2*b.w;}
+  float bw=f2>0.?w2/f2:0.;
+  float m2=smoothstep(.98,1.02,f2);
+  float e2=1.-smoothstep(1.,1.8,f2);
+  c=mix(c,.0118+bw*e2*e2,m2);
+  gl_FragColor=vec4(vec3(c),1.);
+}`;
+
+let W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
+let rimS = .45, pulseT = -1e9, dropPulseT = -1e9;
+let hidden = false, visFrom = 1, visTo = 1, visStart = -1e9, vis = 1;
+let drag = null, pts = new Map(), lastEmpty = -1e9, hintT = 0;
+let textOrb = -1, textShowT = -1e9;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rnd = (() => { let s = 11; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
+
+// orbs: 0 is the newest (slightly brighter); fx/fy are home fractions in the top 55%
+const ORBS = TEXTS.map((text, i) => ({
+  text, i, fx: .12 + .76 * rnd(), fy: .06 + .49 * rnd(), r: 6 + 8 * rnd(), P: 18 + 12 * rnd(), ph: rnd() * TAU,
+  x: 0, y: 0, vx: 0, vy: 0, grab: false, s: 1, state: 'ok', mx: 0, my: 0, mT: 0, goneT: 0, w: i === 0 ? .11 : .07, tw: .07, ox: 0, oy: 0
+}));
+
+function makeView() {
+  const cv = document.getElementById('gl'), g = cv.getContext('webgl', {alpha:false, antialias:false});
+  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(56)};
+  if (!g) return v;
+  const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); return o; };
+  const pr = g.createProgram();
+  g.attachShader(pr, sh(g.VERTEX_SHADER, VS)); g.attachShader(pr, sh(g.FRAGMENT_SHADER, FS));
+  g.linkProgram(pr); g.useProgram(pr);
+  g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
+  g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+  const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
+  ['uRes','uDpr','uRim','uGR','uB','uM'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  return v;
+}
+const HV = makeView();
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2); W = PH.clientWidth; H = PH.clientHeight;
+  HV.cv.width = Math.round(W * DPR); HV.cv.height = Math.round(H * DPR);
+  HV.cv.style.width = W + 'px'; HV.cv.style.height = H + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+const ease = p => p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+function toggle(now) {
+  const cur = visNow(now);
+  hidden = !hidden; visFrom = cur; visTo = hidden ? 0 : 1; visStart = now;
+  if (hidden) textShowT = -1e9;
+}
+function visNow(now) { return visFrom + (visTo - visFrom) * ease(clamp((now - visStart) / 900, 0, 1)); }
+function centerPt() { return {x: W / 2, y: H * .8}; }
+const pt = e => { const r = PH.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
+function orbPos(o) { return {x:o.x, y:o.y + 40 * (1 - vis)}; }
+
+PH.addEventListener('pointerdown', e => {
+  const p = pt(e), now = performance.now();
+  pts.set(e.pointerId, p);
+  if (pts.size === 2) { if (drag) { drag.o.grab = false; drag = null; } toggle(now); return; }
+  if (vis > .5 && !hidden) {
+    for (const o of ORBS) {
+      if (o.state !== 'ok') continue;
+      const q = orbPos(o);
+      if (Math.hypot(p.x - q.x, p.y - q.y) < o.r * o.s + 14) {
+        o.grab = true; drag = {id:e.pointerId, o, x0:p.x, y0:p.y, t0:now, moved:0}; textOrb = o.i; return;
+      }
+    }
+  }
+  if (now - lastEmpty < 300) { lastEmpty = -1e9; toggle(now); return; }
+  lastEmpty = now;
+});
+window.addEventListener('pointermove', e => {
+  if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
+  if (!drag || e.pointerId !== drag.id) return;
+  const p = pt(e);
+  drag.moved = Math.max(drag.moved, Math.hypot(p.x - drag.x0, p.y - drag.y0));
+  drag.o.tx = p.x; drag.o.ty = p.y;
+});
+function end(e) {
+  pts.delete(e.pointerId);
+  if (!drag || e.pointerId !== drag.id) return;
+  const o = drag.o, now = performance.now(), c = centerPt();
+  o.grab = false;
+  if (now - drag.t0 < 200 && drag.moved < 10) { o.pulseT = now; textShowT = now; textOrb = o.i; }
+  else if (Math.hypot(o.x - c.x, o.y - c.y) < 60) { o.state = 'merge'; o.mT = now; o.mx = o.x; o.my = o.y; textShowT = -1e9; }
+  else textShowT = -1e9;
+  drag = null;
+}
+window.addEventListener('pointerup', end);
+window.addEventListener('pointercancel', end);
+window.addEventListener('keydown', e => { if (e.key === 't' || e.key === 'T') toggle(performance.now()); });
+setTimeout(() => HINT.classList.add('on'), 0);
+setTimeout(() => HINT.classList.remove('on'), 3000);
+
+function draw(M) {
+  const g = HV.gl; if (!g) return;
+  const L = HV.L;
+  g.viewport(0, 0, HV.cv.width, HV.cv.height);
+  g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
+  g.uniform1f(L.uRim, rimS); g.uniform1f(L.uGR, 18);
+  g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, M);
+  g.drawArrays(g.TRIANGLES, 0, 3);
+}
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 1 / 30); last = now; T += dt;
+  br = .5 - .5 * Math.cos(T * TAU / 5);
+  vis = visNow(now);
+  const c = centerPt(), cx = c.x, cy = c.y, R = 72 * (1 + .025 * (2 * br - 1));
+
+  // drop: static breathing; pulses once when a thought is reopened
+  const pulse = Math.max(0, 1 - (now - dropPulseT) / 1000);
+  rimS = .45 + .15 * br + .05 * pulse;
+  const hb = [[cx, cy, R * .55, 0]];
+  HV.B.fill(0); hb.forEach((b, k) => HV.B.set(b, k * 4));
+
+  // orbs: home drift (periods 18-30s), springs, momentum with friction .94/frame, soft repel
+  const M = HV.M; M.fill(0);
+  for (const o of ORBS) {
+    if (!o.init) { o.init = true; o.x = o.fx * W; o.y = o.fy * H; }
+    if (o.state === 'merge') {
+      const u = clamp((now - o.mT) / 400, 0, 1);
+      o.x = o.mx + (cx - o.mx) * u; o.y = o.my + (cy - o.my) * u; o.s = 1 - u;
+      if (u >= 1) { o.state = 'gone'; o.goneT = now; dropPulseT = now; }
+      continue;
+    }
+    if (o.state === 'gone') { if (now - o.goneT > 1500) { o.state = 'back'; o.s = 0; o.goneT = now; o.x = o.hx; o.y = o.hy; o.vx = o.vy = 0; } continue; }
+    if (o.state === 'back') { o.s = Math.min(1, (now - o.goneT) / 300); if (o.s >= 1) o.state = 'ok'; }
+    const hx = o.fx * W + Math.sin(T * TAU / o.P + o.ph) * 12, hy = o.fy * H + Math.cos(T * TAU / (o.P * 1.3) + o.ph) * 10;
+    o.hx = hx; o.hy = hy;
+    if (o.grab && o.tx !== undefined) {
+      o.vx += ((o.tx - o.x) * 120 - o.vx * 16) * dt; o.vy += ((o.ty - o.y) * 120 - o.vy * 16) * dt;
+    } else {
+      o.vx += ((hx - o.x) * .8 - o.vx * 1.8) * dt; o.vy += ((hy - o.y) * .8 - o.vy * 1.8) * dt;
+      const f = Math.pow(.94, dt * 60); o.vx *= f; o.vy *= f;
+    }
+    o.x += o.vx * dt; o.y += o.vy * dt;
+    const sp = Math.hypot(o.vx, o.vy) || 1, so = Math.min(.4 * o.r, sp * .03);
+    o.ox = o.vx / sp * so; o.oy = o.vy / sp * so;
+    o.tw += ((o.grab ? .2 : (o.i === 0 ? .11 : .07)) + (now - o.pulseT < 600 ? .3 * (1 - (now - o.pulseT) / 600) : 0) - o.tw) * .15;
+  }
+  for (let a = 0; a < ORBS.length; a++) for (let b = a + 1; b < ORBS.length; b++) {
+    const A = ORBS[a], B = ORBS[b];
+    if (A.state !== 'ok' || B.state !== 'ok' || A.grab || B.grab) continue;
+    const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 1, dmin = 2.4 * (A.r + B.r) / 2;
+    if (d < dmin) { const push = (dmin - d) * .5 / d; A.x -= dx * push; A.y -= dy * push; B.x += dx * push; B.y += dy * push; }
+  }
+  let k = 0;
+  for (const o of ORBS) {
+    if (o.state === 'gone' || o.state === 'merge' && o.s <= 0) continue;
+    const q = orbPos(o), rr = o.r * o.s;
+    M.set([q.x, q.y, rr, o.tw * vis], k * 4); k++;
+    M.set([q.x + o.ox, q.y + o.oy, rr * .8, o.tw * vis], k * 4); k++;
+  }
+
+  // note text: while dragged (after 10px) or 2.5s after a tap, 18px above the orb
+  const t = textOrb >= 0 ? ORBS[textOrb] : null;
+  const showing = t && !hidden && ((drag && drag.o === t && drag.moved > 10) || now - textShowT < 2500);
+  if (t) { const q = orbPos(t); NOTE.style.transform = `translate(${q.x + 12}px,${q.y - t.r - 18}px)`; }
+  if (t && NOTE.textContent !== t.text) NOTE.textContent = t.text;
+  NOTE.classList.toggle('on', !!showing);
+
+  draw(M);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

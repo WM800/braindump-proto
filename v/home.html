@@ -52,30 +52,32 @@ const P0 = {
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, scarSharp:1.5, splitOpen:20, splitHeal:5, halfR:.72, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:700, cutGap:14, cutOpenT:.35, cutHold:.5, cutHeal:2.2, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
-  lightLag:.25, lampH:120, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
+  lightLag:.25, lampH:260, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
   topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.08, homeRate:.15, homeGap:95, homePull:.02, gapBreath:.2, wander:1.8, stagger:.6, repel:5, cohesion:.15, tailK:40, tailC:8, arriveT:5, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthAt:.12, birthLen:.25, birthR:1.4};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v15')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v16')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
-uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uSS;uniform vec4 uB[40];
+uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uCA,uCW;uniform vec4 uCut;uniform vec4 uB[40];
 uniform vec4 uM[48];uniform float uPin[24];uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
   float f=0.;vec2 G=vec2(0.);float lw=0.;
   float fa=0.,fb=0.;vec2 Ga=vec2(0.),Gb=vec2(0.);
-  for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float sd=floor(b.w);float q=pow(b.z*b.z/d2,uK);vec2 g=-2.*uK*q*dv/d2;
-    if(sd>1.5){fb+=q;Gb+=g;}else if(sd>.5){fa+=q;Ga+=g;}else{f+=q;G+=g;}lw+=q*fract(b.w)/.99;}
-  {float fs=fa+fb;vec2 Gs=Ga+Gb;float fm=fa>fb?fa:fb;vec2 Gm=fa>fb?Ga:Gb;f+=mix(fs,fm,uSS);G+=mix(Gs,Gm,uSS);}
+  for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float q=pow(b.z*b.z/d2,uK);vec2 g=-2.*uK*q*dv/d2;
+    if(dot(b.xy-uCut.xy,uCut.zw)>=0.){fa+=q;Ga+=g;}else{fb+=q;Gb+=g;}lw+=q*b.w;}
+  // cut: within a band around the line each side is its own body (max instead of sum); elsewhere the plain sum (= idle)
+  {float cw=uCA*(1.-smoothstep(uCW,uCW*2.,abs(dot(p-uCut.xy,uCut.zw))));
+   f=mix(fa+fb,max(fa,fb),cw);G=mix(Ga+Gb,fa>fb?Ga:Gb,cw);}
   float lwn=f>0.?lw/f:1.;
   float gn=max(length(G),1e-4);
   float sd=(f-1.)/gn;
@@ -83,13 +85,12 @@ void main(){
   float og=exp(-max(-sd,0.)/uGR);
   float edge=1.-smoothstep(1.,1.8,f);
   vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
-  // soft lamp at the finger/cursor: original directional shading, direction taken toward the lamp point,
-  // softened by uLH so it fades gently near the lamp instead of making hot spots
-  vec2 ldv=uLP-p;vec2 ld=ldv/max(length(ldv),uLH);
+  // lamp under the finger/cursor: original shading, direction toward the lamp point, its pull fading softly with distance (uLH)
+  vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));
   vec3 Lv=normalize(vec3(ld*.6,.8)),Hv=normalize(Lv+vec3(0.,0.,1.));
   float side=max(dot(N.xy,ld),0.);
-  float rim=edge*edge*uRim*(.6+1.2*side*side)*lwn;
-  float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn;
+  float rim=edge*edge*uRim*(.6+1.2*side*side*att)*lwn;
+  float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn*(.4+.6*att);
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
   float f2=0.,w2=0.,pw=0.;vec2 G2=vec2(0.);
   for(int i=0;i<48;i++){vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
@@ -154,7 +155,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uSS','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uCA','uCW','uCut','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -248,7 +249,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v15', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v16', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {
@@ -334,7 +335,7 @@ function draw() {
   g.viewport(0, 0, HV.cv.width, HV.cv.height);
   g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
   g.uniform1f(L.uRim, rimS); g.uniform1f(L.uGR, grS);
-  g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uSS, clamp(scarAmt, 0, 1)); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
+  g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uCA, CUT ? CUT.a : 0); g.uniform1f(L.uCW, CUT ? CUT.bw : 1); g.uniform4f(L.uCut, CUT ? CUT.px : 0, CUT ? CUT.py : 0, CUT ? CUT.nx : 0, CUT ? CUT.ny : 1); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
@@ -372,7 +373,7 @@ function fingerForce(o, r, scale) {
 }
 
 // finger cut: held finger is a hole in the water; targets near it move out, links across it break
-let cutS = 0, scarAmt = 0;
+let cutS = 0, CUT = null, lFX = null, lFY = null;
 const SCAR = [];
 function scarW(p, now) { const a = clamp((now - p.t) / (P.scarLife * 1000), 0, 1); return p.w * (1 - a * a * (3 - 2 * a)); }
 function scarSegs(now) {
@@ -437,12 +438,10 @@ function frame(now) {
   if (fing) {
     const lp = SCAR[SCAR.length - 1], same = lp && lp.id === swipe, mv = same ? Math.hypot(PX - lp.x, PY - lp.y) : 0;
     const v = same && mv > 0 ? mv / Math.max((now - lp.t) / 1000, 1e-3) : 0, sp = clamp(Math.max(v, psp) / P.fingerFast, 0, 2);
-    if (!same || mv > 2 || now - lp.t > 50) SCAR.push({x:PX, y:PY, t:now, id:swipe, w:P.cutR * P.scarSpeed * (.35 + .45 * sp)});
+    if (sp > .6 && (!same || mv > 2 || now - lp.t > 50)) SCAR.push({x:PX, y:PY, t:now, id:swipe, w:P.cutR * P.scarSpeed * (.35 + .45 * sp)});
   }
   while (SCAR.length && (now - SCAR[0].t > P.scarLife * 1000 || SCAR.length > 120)) SCAR.shift();
   const SG = scarSegs(now);
-  let gNx = 0, gNy = 1; if (SG.length) { const q = SG[0], l = Math.hypot(q[2] - q[0], q[3] - q[1]) || 1; gNx = -(q[3] - q[1]) / l; gNy = (q[2] - q[0]) / l; }
-  scarAmt += (clamp(SG.reduce((m, q) => Math.max(m, q[4]), 0) / 10, 0, 1) - scarAmt) * Math.min(1, dt * (SG.length ? 8 : 1.5));
   const fastK = 1 - (1 - P.fastFlee) * clamp(psp / P.fingerFast, 0, 1);
 
   // level: shout test, real mic when on, fake level otherwise (FROM core6)
@@ -506,6 +505,24 @@ function frame(now) {
     spAcc = Math.min(2, spAcc + P.splashRate * (lvl - P.splashTh) / (1 - P.splashTh) * dt);
     while (spAcc >= 1) { spAcc -= 1; const a = -Math.PI / 2 + (Math.random() * 2 - 1) * P.splashSpread * Math.PI / 180; spawnDrop(a, a, spdRand() * lvl); }
   } else spAcc = 0;
+  // CUT: a fast stroke across the core opens a straight gap along it: opens, holds, then heals (all smoothstep, no bounce)
+  if (fing && lFX !== null) {
+    const ex = PX - lFX, ey = PY - lFY, L = Math.hypot(ex, ey), v = L / dts;
+    if (v > P.cutSpeed && L > 1) {
+      const t = clamp(((cx - lFX) * ex + (cy - lFY) * ey) / (L * L), 0, 1);
+      if (Math.hypot(lFX + ex * t - cx, lFY + ey * t - cy) < R * 1.1) {
+        const nx = -ey / L, ny = ex / L, w = P.cutGap * clamp(v / P.fingerFast, .6, 1.6);
+        if (CUT && now - CUT.hit < 250) { CUT.hit = now; CUT.w = Math.max(CUT.w, w); }
+        else CUT = {px:lFX + ex * t, py:lFY + ey * t, nx, ny, t0:now, hit:now, w, a:0, bw:1};
+      }
+    }
+  }
+  lFX = fing ? PX : null; lFY = fing ? PY : null;
+  if (CUT) {
+    const u = (now - CUT.hit) / 1000, o = clamp((now - CUT.t0) / 1000 / P.cutOpenT, 0, 1), c2 = clamp((u - P.cutHold) / P.cutHeal, 0, 1);
+    CUT.a = o * o * (3 - 2 * o) * (1 - c2 * c2 * (3 - 2 * c2)); CUT.bw = CUT.w * .5 + R * .25;
+    if (c2 >= 1) CUT = null;
+  }
   const pd = Math.hypot(PX - cx, PY - cy), pAng = Math.atan2(PY - cy, PX - cx), mAng = Math.atan2(FVY, FVX);
   if (P.drops && tearCd <= 0 && moving && psp > P.tearSpeed) {
     if (hold) { const n = 1 + Math.floor(Math.random() * 3); for (let i = 0; i < n; i++) spawnDrop(mAng + (Math.random() - .5) * .6, mAng, spdRand()); tearCd = P.tearCool; }
@@ -535,22 +552,16 @@ function frame(now) {
     c.tx = cx + Math.cos(a) * rho; c.ty = cy + Math.sin(a) * rho * (1 - .08 * (1 - rv));
     c.r = c.rf * R * P.coreScale * (1 + .05 * Math.sin(T * 1.3 + c.a * 2));
     if (c.x === null) { c.x = c.tx; c.y = c.ty; }
-    const tx0 = c.tx, ty0 = c.ty;
-    cutT(c, c.r);
-    // scar: a ball the line runs through splits in two halves on either side; others move off the line (gap = scar width)
-    c.st = 0; c.stx = 0; c.sty = 0;
-    const sn = SG.length ? scarNear(c.tx, c.ty, SG) : null;
-    if (sn) {
-      if (c.snx === undefined || (c.hs || 0) < .5) { c.snx = sn.nx; c.sny = sn.ny; }
-      const fg = sn.nx * gNx + sn.ny * gNy < 0 ? -1 : 1; c.side = sn.sd * fg >= 0 ? 1 : 2;
-      const fl = sn.nx * c.snx + sn.ny * c.sny < 0 ? -1 : 1, nx = sn.nx * fl, ny = sn.ny * fl, sd = sn.sd * fl, rh = c.r * P.halfR, half = sn.w * .5;
-      if (Math.abs(sd) < c.r * .55 && c.r > 6) { c.tx -= nx * sd; c.ty -= ny * sd; c.st = 1; c.stx = nx * (half + rh); c.sty = ny * (half + rh); c.sideP = nx * gNx + ny * gNy >= 0 ? 1 : 2; }
-      else if (Math.abs(sd) < half + c.r) { const m = (half + c.r - Math.abs(sd)) * Math.sign(sd || 1) * P.scarPush; c.tx += nx * m; c.ty += ny * m; }
+    // cut: a ball on the line splits into two halves (one per side), the others glide off the line
+    c.hx = 0; c.hy = 0;
+    if (CUT && CUT.a > 0) {
+      const sd = (c.tx - CUT.px) * CUT.nx + (c.ty - CUT.py) * CUT.ny, ad = Math.abs(sd), a = CUT.a, half = CUT.w * .5;
+      const st = 1 - clamp((ad - c.r * .45) / (c.r * .2), 0, 1), rh = c.r * .7071;
+      c.tx -= CUT.nx * sd * st * a; c.ty -= CUT.ny * sd * st * a;
+      c.hx = CUT.nx * (half + rh) * st * a; c.hy = CUT.ny * (half + rh) * st * a;
+      const m = Math.max(0, half + c.r - ad) * Math.sign(sd || 1) * (1 - st) * a;
+      c.tx += CUT.nx * m; c.ty += CUT.ny * m;
     }
-    c.cdx = c.cdx || 0; c.cdy = c.cdy || 0; const ce = Math.min(1, dt * P.cutEase);
-    c.cdx += (c.tx - tx0 - c.cdx) * ce; c.cdy += (c.ty - ty0 - c.cdy) * ce; c.tx = tx0 + c.cdx; c.ty = ty0 + c.cdy;
-    // only balls touched by the cut get a crisper field (s), the rest of the body renders exactly as idle
-    c.sh = (c.sh || 0) + ((c.st ? clamp((c.hs || 0) / (c.r * .5), 0, 1) : 0) - (c.sh || 0)) * Math.min(1, dt * 3);
   }
   // onset: the voice "hits" a few petals outward
   if (recLike && lvl > avg + .12 && now - lastOnset > 150) {
@@ -566,7 +577,7 @@ function frame(now) {
     for (let j = 0; j < CORE.length; j++) {
       const o = CORE[j]; if (j === i) continue;
       const L0 = Math.hypot(c.tx - o.tx, c.ty - o.ty), dx = o.x - c.x, dy = o.y - c.y, d = Math.hypot(dx, dy) || 1;
-      if (d > L0 && !cutLink(c, o)) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
+      if (d > L0) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
     }
     if (fing) fingerForce(c, c.r, fastK);
     { const dx = c.x - PX, dy = c.y - PY, d = Math.hypot(dx, dy) || 1, dm = (P.cutR + c.r) * cutS; if (d < dm) { c.ax += dx / d * (dm - d) * k * 2; c.ay += dy / d * (dm - d) * k * 2; } }
@@ -578,11 +589,7 @@ function frame(now) {
   }
   for (const c of CORE) {
     c.vx += c.ax * dt; c.vy += c.ay * dt; c.x += c.vx * dt; c.y += c.vy * dt;
-    // split halves: offset opens fast while cut, heals slowly (critically damped)
-    c.hx = c.hx || 0; c.hy = c.hy || 0; c.hvx = c.hvx || 0; c.hvy = c.hvy || 0;
-    const hk = c.st ? P.splitOpen : P.splitHeal, hcc = 2 * Math.sqrt(hk);
-    c.hvx += ((c.stx - c.hx) * hk - c.hvx * hcc) * dt; c.hvy += ((c.sty - c.hy) * hk - c.hvy * hcc) * dt;
-    c.hx += c.hvx * dt; c.hy += c.hvy * dt; c.hs = Math.hypot(c.hx, c.hy);
+    c.hs = Math.hypot(c.hx, c.hy);
     const ex = c.x - cx, ey = c.y - cy, ed = Math.hypot(ex, ey) || 1, lim = P.maxStretch * R;
     if (ed > lim) { c.x = cx + ex / ed * lim; c.y = cy + ey / ed * lim; }
   }
@@ -602,23 +609,22 @@ function frame(now) {
   const hb = [];
   for (const c of CORE) {
     const lw = clamp(P.smallLight + (1 - P.smallLight) * (c.r / (.4 * R) - .35) / .65, P.smallLight, 1), hs = c.hs || 0;
-    const lwq = lw * .99;
-    if (hs < .5) { hb.push([c.x, c.y, c.r * vol, (c.side || 0) + lwq]); continue; }
-    const rr = c.r * vol * (1 - (1 - P.halfR) * clamp(hs / (c.r * .5), 0, 1));
-    const sp = c.sideP || 1; hb.push([c.x + c.hx, c.y + c.hy, rr, sp + lwq], [c.x - c.hx, c.y - c.hy, rr, 3 - sp + lwq]);
+    if (hs < .5) { hb.push([c.x, c.y, c.r * vol, lw]); continue; }
+    const rr = c.r * vol * .7071; // two halves = same field as the whole ball
+    hb.push([c.x + c.hx, c.y + c.hy, rr, lw], [c.x - c.hx, c.y - c.hy, rr, lw]);
   }
   for (const d of DR) hb.push([d.x, d.y, d.r, P.dropLight]);
   for (const o of ORBS) {
     if (o.state !== 'arrive' || o.x === null) { o.bf = 0; continue; }
     const u = clamp((now - o.arriveT) / (P.arriveT * 1000), 0, 1); o.bf = 1 - clamp((u - P.birthAt) / P.birthLen, 0, 1);
-    if (o.bf > 0) hb.push([o.x, o.y, Math.max(o.r, 10) * P.birthR * o.bf, .99]);
+    if (o.bf > 0) hb.push([o.x, o.y, Math.max(o.r, 10) * P.birthR * o.bf, 1]);
   }
   // release: droplet pinches off the top (300ms), then rises (FROM core6)
   if (drop && !P.dropAnim) drop = null;
   if (drop) {
     const e = now - drop.t0;
-    if (e < 300) hb.push([cx, cy - R * (.55 + .4 * e / 300), 10, .99]);
-    else { const u = (e - 300) / 600; if (u >= 1) drop = null; else hb.push([cx, cy - R * .95 - 60 * (1 - Math.pow(1 - u, 3)), 10 * (1 - u), .99]); }
+    if (e < 300) hb.push([cx, cy - R * (.55 + .4 * e / 300), 10, 1]);
+    else { const u = (e - 300) / 600; if (u >= 1) drop = null; else hb.push([cx, cy - R * .95 - 60 * (1 - Math.pow(1 - u, 3)), 10 * (1 - u), 1]); }
   }
   HV.B.fill(0); hb.slice(0, 40).forEach((b, k) => HV.B.set(b, k * 4));
 

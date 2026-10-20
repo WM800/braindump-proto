@@ -72,7 +72,10 @@ void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
   float f=0.;vec2 G=vec2(0.);float lw=0.;
-  for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float kk=uK*(1.+uSS*floor(b.w)/15.);float q=pow(b.z*b.z/d2,kk);f+=q;G-=2.*kk*q*dv/d2;lw+=q*fract(b.w)/.99;}
+  float fa=0.,fb=0.;vec2 Ga=vec2(0.),Gb=vec2(0.);
+  for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float sd=floor(b.w);float q=pow(b.z*b.z/d2,uK);vec2 g=-2.*uK*q*dv/d2;
+    if(sd>1.5){fb+=q;Gb+=g;}else if(sd>.5){fa+=q;Ga+=g;}else{f+=q;G+=g;}lw+=q*fract(b.w)/.99;}
+  {float fs=fa+fb;vec2 Gs=Ga+Gb;float fm=fa>fb?fa:fb;vec2 Gm=fa>fb?Ga:Gb;f+=mix(fs,fm,uSS);G+=mix(Gs,Gm,uSS);}
   float lwn=f>0.?lw/f:1.;
   float gn=max(length(G),1e-4);
   float sd=(f-1.)/gn;
@@ -331,7 +334,7 @@ function draw() {
   g.viewport(0, 0, HV.cv.width, HV.cv.height);
   g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
   g.uniform1f(L.uRim, rimS); g.uniform1f(L.uGR, grS);
-  g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uSS, P.scarSharp); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
+  g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uSS, clamp(scarAmt, 0, 1)); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
@@ -438,6 +441,7 @@ function frame(now) {
   }
   while (SCAR.length && (now - SCAR[0].t > P.scarLife * 1000 || SCAR.length > 120)) SCAR.shift();
   const SG = scarSegs(now);
+  let gNx = 0, gNy = 1; if (SG.length) { const q = SG[0], l = Math.hypot(q[2] - q[0], q[3] - q[1]) || 1; gNx = -(q[3] - q[1]) / l; gNy = (q[2] - q[0]) / l; }
   scarAmt += (clamp(SG.reduce((m, q) => Math.max(m, q[4]), 0) / 10, 0, 1) - scarAmt) * Math.min(1, dt * (SG.length ? 8 : 1.5));
   const fastK = 1 - (1 - P.fastFlee) * clamp(psp / P.fingerFast, 0, 1);
 
@@ -538,8 +542,9 @@ function frame(now) {
     const sn = SG.length ? scarNear(c.tx, c.ty, SG) : null;
     if (sn) {
       if (c.snx === undefined || (c.hs || 0) < .5) { c.snx = sn.nx; c.sny = sn.ny; }
+      const fg = sn.nx * gNx + sn.ny * gNy < 0 ? -1 : 1; c.side = sn.sd * fg >= 0 ? 1 : 2;
       const fl = sn.nx * c.snx + sn.ny * c.sny < 0 ? -1 : 1, nx = sn.nx * fl, ny = sn.ny * fl, sd = sn.sd * fl, rh = c.r * P.halfR, half = sn.w * .5;
-      if (Math.abs(sd) < c.r * .55 && c.r > 6) { c.tx -= nx * sd; c.ty -= ny * sd; c.st = 1; c.stx = nx * (half + rh); c.sty = ny * (half + rh); }
+      if (Math.abs(sd) < c.r * .55 && c.r > 6) { c.tx -= nx * sd; c.ty -= ny * sd; c.st = 1; c.stx = nx * (half + rh); c.sty = ny * (half + rh); c.sideP = nx * gNx + ny * gNy >= 0 ? 1 : 2; }
       else if (Math.abs(sd) < half + c.r) { const m = (half + c.r - Math.abs(sd)) * Math.sign(sd || 1) * P.scarPush; c.tx += nx * m; c.ty += ny * m; }
     }
     c.cdx = c.cdx || 0; c.cdy = c.cdy || 0; const ce = Math.min(1, dt * P.cutEase);
@@ -597,10 +602,10 @@ function frame(now) {
   const hb = [];
   for (const c of CORE) {
     const lw = clamp(P.smallLight + (1 - P.smallLight) * (c.r / (.4 * R) - .35) / .65, P.smallLight, 1), hs = c.hs || 0;
-    const lwq = Math.floor((c.sh || 0) * 15) + lw * .99;
-    if (hs < .5) { hb.push([c.x, c.y, c.r * vol, lwq]); continue; }
+    const lwq = lw * .99;
+    if (hs < .5) { hb.push([c.x, c.y, c.r * vol, (c.side || 0) + lwq]); continue; }
     const rr = c.r * vol * (1 - (1 - P.halfR) * clamp(hs / (c.r * .5), 0, 1));
-    hb.push([c.x + c.hx, c.y + c.hy, rr, lwq], [c.x - c.hx, c.y - c.hy, rr, lwq]);
+    const sp = c.sideP || 1; hb.push([c.x + c.hx, c.y + c.hy, rr, sp + lwq], [c.x - c.hx, c.y - c.hy, rr, 3 - sp + lwq]);
   }
   for (const d of DR) hb.push([d.x, d.y, d.r, P.dropLight]);
   for (const o of ORBS) {

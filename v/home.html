@@ -629,7 +629,7 @@ function frame(now) {
   let k = 0, gk = 0;
   for (const o of ORBS) {
     if (o.state === 'gone' || (o.state === 'merge' && o.s <= 0) || o.x === null || k >= 10) continue;
-    const q = orbPos(o), rr = o.r * o.s, ef = clamp((q.y + o.r) / (P.edgeFade * H), 0, 1), w = (o.tw * vis * o.rs * o.dim + (o.pinned ? P.pinRim : 0)) * ef * ef * (3 - 2 * ef) * (1 - (o.bf || 0)), sh = 40 * (1 - vis);
+    const q = orbPos(o), rr = o.r * o.s * (1 - (o.bf || 0)), ef = clamp((q.y + o.r) / (P.edgeFade * H), 0, 1), w = (o.tw * vis * o.rs * o.dim + (o.pinned ? P.pinRim : 0)) * ef * ef * (3 - 2 * ef) * (1 - (o.bf || 0)), sh = 40 * (1 - vis);
     M.set([q.x, q.y, rr, w], k * 8); M.set([o.qx, o.qy + sh, rr * .8, w], k * 8 + 4);
     PN[k] = o.pinned ? P.pinInner : 0;
     if (o.pinned && gk < 4) { GL.set([q.x, q.y, P.auraScale * o.r, P.glowI * vis], gk * 4); gk++; }

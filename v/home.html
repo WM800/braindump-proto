@@ -78,8 +78,9 @@ void main(){
     fA+=q*mA;fB+=q*mB;xA+=g.x*mA;yA+=g.y*mA;xB+=g.x*mB;yB+=g.y*mB;lw+=q*(b.w-2.*gi);}
   // cut pieces: each group is its own body; groups join by a smooth union (p-norm), blended in by uSep
   {vec4 o=vec4(1.);f=dot(fA,o)+dot(fB,o);G=vec2(dot(xA,o)+dot(xB,o),dot(yA,o)+dot(yB,o));
-   if(uSep>0.){vec4 a5=pow(fA,vec4(5.)),b5=pow(fB,vec4(5.));float S=dot(a5*fA,o)+dot(b5*fB,o);float fs=pow(S,1./6.);float fs5=max(pow(fs,5.),1e-6);
-     vec2 Gs=vec2(dot(a5,xA)+dot(b5,xB),dot(a5,yA)+dot(b5,yB))/fs5;f=mix(f,fs,uSep);G=mix(G,Gs,uSep);}}
+   if(uSep>0.){float pe=1.+5.*uSep;vec4 sA=max(fA,vec4(1e-5)),sB=max(fB,vec4(1e-5));vec4 a5=pow(sA,vec4(pe-1.)),b5=pow(sB,vec4(pe-1.));
+     float S=dot(a5*fA,o)+dot(b5*fB,o);float fs=pow(max(S,1e-9),1./pe);float fs5=max(pow(fs,pe-1.),1e-6);
+     f=fs;G=vec2(dot(a5,xA)+dot(b5,xB),dot(a5,yA)+dot(b5,yB))/fs5;}}
   float lwn=f>0.?lw/f:1.;
   float gn=max(length(G),1e-4);
   float sd=(f-1.)/gn;
@@ -375,7 +376,7 @@ function fingerForce(o, r, scale) {
 }
 
 // finger cut: held finger is a hole in the water; targets near it move out, links across it break
-let cutS = 0, lFX = null, lFY = null, sepAmt = 0, lastCut = -1e9;
+let cutS = 0, kFs = 0, lFX = null, lFY = null, sepAmt = 0, lastCut = -1e9;
 // FRACTURE: every core part renders as fragments (idle: exactly one, = the part itself). A fast finger stroke is a blade:
 // fragments it runs through split in two (same field when they coincide), nearby ones are shoved aside and dragged.
 // Pieces separated by a stroke are separate bodies (groups) until everything heals; strokes accumulate and overlap.
@@ -391,6 +392,7 @@ function fracture(now, dt, dts, vol, fing) {
   if (!FR.length) for (const c of CORE) FR.push({c, m:1, ox:0, oy:0, vx:0, vy:0, rx:0, ry:0, g:0, x:0, y:0, r:0});
   const rOf = q => q.c.r * Math.sqrt(q.m) * vol;
   // blade
+  let cutNow = false;
   if (fing && lFX !== null) {
     const ex = PX - lFX, ey = PY - lFY, L = Math.hypot(ex, ey), v = L / dts;
     if (v > P.cutSpeed && L > .5) {
@@ -401,17 +403,25 @@ function fracture(now, dt, dts, vol, fing) {
         const t = clamp(((x - lFX) * ex + (y - lFY) * ey) / (L * L), 0, 1), px = lFX + ex * t, py = lFY + ey * t, sd = (x - px) * nx + (y - py) * ny, d = Math.hypot(x - px, y - py);
         if (d > r + bw) continue;
         hit = true;
-        if (Math.abs(sd) < r * .75 && d < r * .9 && r > P.fragMin && FR.length < P.maxFrags && !(now - (q.ct || -1e9) < 250)) {
+        if (Math.abs(sd) < r * .75 && d < r * .9 && r > P.fragMin && FR.length < P.maxFrags && !(now - (q.ct || -1e9) < 120)) {
           const k = r * .7071 * .55, bx = px - q.c.x, by = py - q.c.y, dvx = ux * v * P.cutDrag, dvy = uy * v * P.cutDrag;
-          const A = {c:q.c, m:q.m / 2, ox:bx + nx * k, oy:by + ny * k, vx:q.vx + nx * imp + dvx, vy:q.vy + ny * imp + dvy, rx:q.rx + nx * k, ry:q.ry + ny * k, g:0, x:0, y:0, r:0, ct:now};
-          const B = {c:q.c, m:q.m / 2, ox:bx - nx * k, oy:by - ny * k, vx:q.vx - nx * imp + dvx, vy:q.vy - ny * imp + dvy, rx:q.rx - nx * k, ry:q.ry - ny * k, g:0, x:0, y:0, r:0, ct:now};
+          const A = {c:q.c, m:q.m / 2, ox:bx + nx * k, oy:by + ny * k, vx:q.vx + nx * imp + dvx, vy:q.vy + ny * imp + dvy, rx:q.rx + nx * k, ry:q.ry + ny * k, g:q.g, x:0, y:0, r:0, ct:now};
+          const B = {c:q.c, m:q.m / 2, ox:bx - nx * k, oy:by - ny * k, vx:q.vx - nx * imp + dvx, vy:q.vy - ny * imp + dvy, rx:q.rx - nx * k, ry:q.ry - ny * k, g:q.g, x:0, y:0, r:0, ct:now};
           FR.splice(i, 1, A, B);
         } else {
           const w = 1 - clamp((d - r * .75) / (r * .25 + bw), 0, 1), sg = Math.sign(sd || 1);
           q.vx += (nx * sg * imp * .6 + ux * v * P.cutDrag) * w; q.vy += (ny * sg * imp * .6 + uy * v * P.cutDrag) * w;
         }
       }
-      if (hit) { lastCut = now; STK.push([lFX - ux * 3, lFY - uy * 3, PX + ux * 3, PY + uy * 3]); if (STK.length > 160) STK.shift(); }
+      if (hit) {
+        lastCut = now; cutNow = true;
+        const lk = STK[STK.length - 1];
+        if (lk && Math.hypot(lk[2] - ux * 3 - lFX, lk[3] - uy * 3 - lFY) < 1) {
+          const lx = lk[2] - lk[0], ly = lk[3] - lk[1], ll = Math.hypot(lx, ly) || 1;
+          if ((lx * ux + ly * uy) / ll > .985) { lk[2] = PX + ux * 3; lk[3] = PY + uy * 3; } else STK.push([lFX - ux * 3, lFY - uy * 3, PX + ux * 3, PY + uy * 3]);
+        } else STK.push([lFX - ux * 3, lFY - uy * 3, PX + ux * 3, PY + uy * 3]);
+        if (STK.length > 64) STK.shift();
+      }
     }
   }
   // separation amount: on while cutting, heals smoothly after cutHold
@@ -421,7 +431,7 @@ function fracture(now, dt, dts, vol, fing) {
   // groups: fragments are bonded when close and no stroke lies between them
   const n = FR.length;
   for (let i = 0; i < n; i++) { UF[i] = i; const q = FR[i]; q.x = q.c.x + q.ox; q.y = q.c.y + q.oy; q.r = rOf(q); }
-  if (STK.length) {
+  if (STK.length && cutNow) {
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
       const a = FR[i], b = FR[j];
       if (Math.hypot(a.x - b.x, a.y - b.y) > a.r + b.r + P.bondR) continue;
@@ -431,9 +441,10 @@ function fracture(now, dt, dts, vol, fing) {
     }
     let ng = 0; const gid = {};
     for (let i = 0; i < n; i++) { const r0 = ufFind(i); if (gid[r0] === undefined) gid[r0] = Math.min(7, ng++); FR[i].g = gid[r0]; }
-  } else for (let i = 0; i < n; i++) FR[i].g = 0;
+  } else if (!STK.length) for (let i = 0; i < n; i++) FR[i].g = 0;
   // fragment motion: loose fluid while cut, pulled home (critically damped) while healing
-  const kF = P.fragK * (cutting ? P.fragLoose : 1), cF = 2 * Math.sqrt(kF), gap = P.cutGap * sepAmt;
+  kFs += (P.fragK * (cutting ? P.fragLoose : 1) - kFs) * Math.min(1, dt * (cutting ? 8 : 1.5));
+  const kF = kFs, cF = 2 * Math.sqrt(kF), gap = P.cutGap * sepAmt;
   const decay = cutting ? 1 : Math.exp(-dt * P.healRate);
   for (let i = 0; i < n; i++) {
     const a = FR[i]; a.rx *= decay; a.ry *= decay;

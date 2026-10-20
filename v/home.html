@@ -66,7 +66,7 @@ try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v22')) || {}); }
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
-uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uNB,uNM,uSep,uRW;uniform vec4 uB[40];
+uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uNB,uNM,uSep,uRW;uniform vec2 uC;uniform vec4 uB[40];
 uniform vec4 uM[48];uniform float uPin[24];uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
@@ -87,6 +87,8 @@ void main(){
   float m=smoothstep(-.7,.7,sd);
   float og=exp(-max(-sd,0.)/uGR);
   float edge=uRW>0.?(1.-smoothstep(0.,uRW,sd))*(1.-smoothstep(1.12,1.7,f)):1.-smoothstep(1.,1.8,f);
+  // light only the outer silhouette: surfaces facing back toward the body (necks, crevices around a leaving petal) stay dark
+  {vec2 rp=p-uC;float cv=smoothstep(-.05,.5,dot(-G/gn,rp/max(length(rp),1.)));edge*=mix(cv,1.,uSep);}
   vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
   // lamp under the finger/cursor: original shading, direction toward the lamp point, its pull fading softly with distance (uLH)
   vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));
@@ -161,7 +163,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uRW','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uRW','uC','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -345,7 +347,7 @@ function draw() {
   g.viewport(0, 0, HV.cv.width, HV.cv.height);
   g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
   g.uniform1f(L.uRim, rimS * P.rimGain); g.uniform1f(L.uGR, grS);
-  g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uRW, P.rimW); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
+  g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uRW, P.rimW); g.uniform2f(L.uC, CX, CY); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);

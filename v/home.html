@@ -459,6 +459,7 @@ function fracture(now, dt, dts, vol, fing) {
   } else if (!STK.length) for (let i = 0; i < n; i++) FR[i].g = 0;
   // fragment motion: loose fluid while cut, pulled home (critically damped) while healing
   kFs += (P.fragK * (cutting ? P.fragLoose : P.fragHealK) - kFs) * Math.min(1, dt * (cutting ? 8 : 3));
+  kFs = Math.max(0, kFs);
   const kF = kFs, cF = 2 * Math.sqrt(kF), gap = P.cutGap * sepAmt;
   const decay = cutting ? 1 : Math.exp(-dt * P.healRate);
   for (let i = 0; i < n; i++) {
@@ -537,7 +538,7 @@ function cutLink(a, b) {
 }
 
 function frame(now) {
-  const dt = Math.min((now - last) / 1000, 1 / 30); last = now; T += dt;
+  const dt = clamp((now - last) / 1000, 0, 1 / 30); last = now; T += dt;
   spring(sc, dt);
   br = .5 - .5 * Math.cos(T * TAU / 5);
   vis = visNow(now);

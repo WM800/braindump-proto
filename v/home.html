@@ -56,7 +56,7 @@ const P0 = {
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
-  lightLag:.25, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
+  lightLag:.25, lampH:60, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
   topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.08, homeRate:.15, homeGap:95, homePull:.02, gapBreath:.2, wander:1.8, stagger:.6, repel:5, cohesion:.15, tailK:40, tailC:8, arriveT:5, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
   // pin: stays where dropped, slow soft aura + wave
@@ -66,7 +66,7 @@ try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v14')) || {}); }
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
-uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD;uniform vec4 uB[40];
+uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH;uniform vec4 uB[40];
 uniform vec4 uM[48];uniform float uPin[24];uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
@@ -80,8 +80,10 @@ void main(){
   float og=exp(-max(-sd,0.)/uGR);
   float edge=1.-smoothstep(1.,1.8,f);
   vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
-  vec3 Lv=normalize(vec3(uLD*.6,.8)),Hv=normalize(Lv+vec3(0.,0.,1.));
-  float side=max(dot(N.xy,uLD),0.);
+  // point lamp under the finger/cursor (per-pixel direction), hovering uLH px above the surface
+  vec2 ldv=uLP-p;vec2 ld=ldv/max(length(ldv),1.);
+  vec3 Lv=normalize(vec3(ldv,uLH)),Hv=normalize(Lv+vec3(0.,0.,1.));
+  float side=max(dot(N.xy,ld),0.);
   float rim=edge*edge*uRim*(.6+1.2*side*side)*lwn;
   float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn;
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
@@ -93,7 +95,7 @@ void main(){
   // orbs lit by the same lamp as the core: rim on the lit side + highlight; pinned = filled lit sphere, no dark band
   float gn2=max(length(G2),1e-4);
   vec3 N2=normalize(vec3(-G2/gn2*e2*.9,1.));
-  float side2=max(dot(N2.xy,uLD),0.);
+  float side2=max(dot(N2.xy,ld),0.);
   float pk=f2>0.?pw/f2:0.;
   float body=.0118+pk*(.55+.45*sqrt(max(0.,1.-1./max(f2,1.))));
   float rim2=(bw+pk*.5)*e2*e2*(.4+1.6*side2*side2);
@@ -113,7 +115,7 @@ const BS = [0, 0, 0, 0, 0, 0];
 const DR = [], WV = [];
 let AUR = null;
 const QX = {p:0, v:0}, QY = {p:0, v:0};
-let PX = 0, PY = 0, lPX = 0, lPY = 0, lastIn = -1e9, LD = [1, 0], CX = 0, CY = 0, RR = 72, psp = 0, FVX = 0, FVY = 0;
+let LP = [0, 0], PX = 0, PY = 0, lPX = 0, lPY = 0, lastIn = -1e9, LD = [1, 0], CX = 0, CY = 0, RR = 72, psp = 0, FVX = 0, FVY = 0;
 let drag = null, swipe = null, pts = new Map(), lastEmpty = -1e9, hidden = false, visFrom = 1, visTo = 1, visStart = -1e9, vis = 1;
 let textOrb = null, textShowT = -1e9, dropPulseT = -1e9, corner = [], SEQ = 0;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -148,7 +150,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -329,7 +331,7 @@ function draw() {
   g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
   g.uniform1f(L.uRim, rimS); g.uniform1f(L.uGR, grS);
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
-  g.uniform2f(L.uLD, LD[0], LD[1]);
+  g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
   g.drawArrays(g.TRIANGLES, 0, 3);
@@ -475,6 +477,10 @@ function frame(now) {
   ll = Math.hypot(lx, ly) || 1; lx /= ll; ly /= ll;
   const lk = 1 - Math.exp(-dt / P.lightLag);
   LD[0] += (lx - LD[0]) * lk; LD[1] += (ly - LD[1]) * lk;
+  // lamp position: at the finger; idle -> wanders slowly around the core
+  const ip = now - lastIn > P.idleT * 1000, lpx = ip ? cx + wx * R * P.idleR : PX, lpy = ip ? cy + wy * R * P.idleR : PY;
+  if (!LP[0] && !LP[1]) { LP[0] = lpx; LP[1] = lpy; }
+  LP[0] += (lpx - LP[0]) * lk; LP[1] += (lpy - LP[1]) * lk;
   ll = Math.hypot(LD[0], LD[1]) || 1; LD[0] /= ll; LD[1] /= ll;
 
   // splash on loud voice; tear on a fast finger

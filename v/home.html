@@ -52,7 +52,7 @@ const P0 = {
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:3, fragHealK:1.6, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:4, fragHealK:2.5, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
@@ -62,7 +62,7 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v28')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v29')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -260,7 +260,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v28', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v29', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {

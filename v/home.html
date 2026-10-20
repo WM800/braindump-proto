@@ -46,7 +46,7 @@ const TEXTS = ['Call mom back', 'Light as a material', 'Oat milk run', 'Garden: 
 const P0 = {
   // core body: irregular parts (3 big, 7 small), one cohesive whole
   coreY:.8, coreScale:1, partDrift:.08, idleSpin:60,
-  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.5, onsetKick:220, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.4, onsetMin:.12, voiceWave:1.5, voiceWaveGap:450, toneSwirl:900, maxStretch:1.8, followMax:8, grabPull:16,
+  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.7, onsetKick:260, agcFloor:.4, agcPeak:.35, puffK:90, bandPush:25, toneStretch:.35, shiver:14, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.2, onsetMin:.18, voiceWave:1.5, voiceWaveGap:450, toneSwirl:900, maxStretch:1.8, followMax:8, grabPull:16,
   // field: 1 = original soft merge, higher = crisper pinch-off between parts
   sharp:1, smallLight:.5,
   // droplets off by default (drops:1 re-enables splash/tear)
@@ -62,7 +62,7 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimW:9, rimGain:1.6, birthPull:5};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v19')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v20')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -117,7 +117,8 @@ void main(){
 
 let W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
 let lvl = 0, avg = 0, rimS = .45, grS = 18, rv = 0, spAcc = 0, tearCd = 0, shoutEnd = -1e9;
-const PB = [0, 0, 0, 0, 0, 0], FX = [0, 0, 0, 0, 0, 0];
+const PB = [0, 0, 0, 0, 0, 0], FX = [0, 0, 0, 0, 0, 0], BF = [0, 0, 0, 0, 0, 0], BP2 = [.1, .1, .1, .1, .1, .1];
+let envS = 0, puff = 0, toneS = 0;
 let lastVWave = -1e9, fluxAvg = 0, centAvg = 2.5, toneV = 0, grabP = null, rec = false, recId = null, recT0 = 0, shown = -1, drop = null, lastOnset = -1e9;
 let micState = 'idle', an = null, ctxA = null, tbuf = null, freq = null;
 const sc = {x:1, v:0, t:1};
@@ -196,7 +197,7 @@ function micLevels() {
   for (let k = 0; k < 6; k++) {
     const i0 = Math.max(1, Math.floor(80 * Math.pow(50, k / 6) / hz)), i1 = Math.max(i0, Math.min(freq.length - 1, Math.ceil(80 * Math.pow(50, (k + 1) / 6) / hz)));
     let sum = 0; for (let i = i0; i <= i1; i++) sum += freq[i];
-    out.push(gate ? 0 : Math.min(1, Math.sqrt(sum / (i1 - i0 + 1) / 255) * 1.4));
+    out.push(gate ? 0 : Math.sqrt(sum / (i1 - i0 + 1) / 255));
   }
   return {lvl:L, bands:out};
 }
@@ -254,7 +255,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v19', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v20', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {
@@ -556,11 +557,17 @@ function frame(now) {
   }
   lvl += (vt - lvl) * Math.min(1, dt * (vt > lvl ? P.lvlAtk : P.lvlRel));
   avg += (lvl - avg) * Math.min(1, dt / .3);
+  if (rec) for (let k = 0; k < 6; k++) {
+    BF[k] += (bt[k] - BF[k]) * Math.min(1, dt * (bt[k] < BF[k] ? 8 : P.agcFloor));
+    BP2[k] = Math.max(bt[k], BP2[k] - dt * P.agcPeak * BP2[k]);
+    bt[k] = bt[k] <= 0 ? 0 : clamp((bt[k] - BF[k]) / Math.max(.06, BP2[k] - BF[k]), 0, 1);
+  }
+  envS += (lvl - envS) * Math.min(1, dt / .22); puff = Math.max(0, lvl - envS);
   let flux = 0;
   for (let k = 0; k < 6; k++) { const dv = bt[k] - PB[k]; FX[k] = Math.max(0, dv); flux += FX[k]; PB[k] = bt[k]; BS[k] += (bt[k] - BS[k]) * Math.min(1, dt * (bt[k] > BS[k] ? P.bandAtk : P.bandRel)); }
   fluxAvg += (flux - fluxAvg) * Math.min(1, dt / .4);
   let cn = 0, cs = 0; for (let k = 0; k < 6; k++) { cn += k * bt[k]; cs += bt[k]; }
-  const cent = cs > .05 ? cn / cs : centAvg; toneV = cent - centAvg; centAvg += (cent - centAvg) * Math.min(1, dt / .5);
+  const cent = cs > .05 ? cn / cs : centAvg; toneV = cent - centAvg; centAvg += (cent - centAvg) * Math.min(1, dt / .5); toneS += (clamp(toneV * 2, -.5, .5) * (rec ? 1 : 0) - toneS) * Math.min(1, dt * 6);
   rv += ((recLike ? 1 : 0) - rv) * Math.min(1, dt * 4);
   rimS += ((recLike ? .6 + .4 * lvl : .45 + .15 * br + .05 * Math.max(0, 1 - (now - dropPulseT) / 1000)) - rimS) * .12;
   grS += ((18 + 16 * lvl * rv) - grS) * .12;
@@ -636,6 +643,7 @@ function frame(now) {
     const a = c.a + spin * (c.band < 0 ? .5 : 1) + .25 * Math.sin(T * TAU / (c.per * 1.3) + c.a);
     const rho = c.of * R * (1 + P.partDrift * 2 * Math.sin(T * TAU / c.per + c.a * 1.7)) + (c.band >= 0 ? BS[c.band] * P.lobeMax * R * rv : 0);
     c.tx = cx + Math.cos(a) * rho; c.ty = cy + Math.sin(a) * rho * (1 - .08 * (1 - rv));
+    { const st = toneS * P.toneStretch * rv; c.tx = cx + (c.tx - cx) * (1 - st); c.ty = cy + (c.ty - cy) * (1 + st); }
     c.r = c.rf * R * P.coreScale * (1 + .05 * Math.sin(T * 1.3 + c.a * 2));
     if (c.x === null) { c.x = c.tx; c.y = c.ty; }
   }
@@ -647,6 +655,12 @@ function frame(now) {
       c.vx += ux / ud * kk; c.vy += uy / ud * kk;
     }
     if (P.voiceWave > 0 && now - lastVWave > P.voiceWaveGap) { lastVWave = now; addWave(cx, cy, P.voiceWave * Math.min(1, flux)); }
+  }
+  if (recLike) for (const c of CORE) {
+    const ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1, bk = c.band >= 0 ? BS[c.band] : lvl;
+    const pf = P.puffK * puff * R * (c.band >= 0 ? 1 : .4) + P.bandPush * bk * R * (c.band >= 0 ? 1 : .2);
+    c.vx += ux / ud * pf * dt; c.vy += uy / ud * pf * dt;
+    if (c.band >= 0) { const hs = (BS[4] + BS[5]) * .5 * P.shiver; c.vx += (Math.random() - .5) * hs * dt * 60; c.vy += (Math.random() - .5) * hs * dt * 60; }
   }
   // tone shifts (spectral centroid moving up/down) swirl the petals around the body
   if (recLike && Math.abs(toneV) > .05) for (const c of CORE) {

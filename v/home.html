@@ -60,7 +60,7 @@ const P0 = {
   // thoughts: slow upward stream, critically damped (no bounce)
   topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.08, homeRate:.15, homeGap:95, homePull:.02, gapBreath:.2, wander:1.8, stagger:.6, repel:5, cohesion:.15, tailK:40, tailC:8, arriveT:5, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
   // pin: stays where dropped, slow soft aura + wave
-  pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:9, rimGain:1.6, birthPull:5};
+  pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:1.6, birthPull:5};
 const P = Object.assign({}, P0);
 try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v24')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
@@ -72,10 +72,10 @@ void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
   float f=0.;vec2 G=vec2(0.);float lw=0.;
-  float fi=0.;vec4 fA=vec4(0.),fB=vec4(0.),xA=vec4(0.),yA=vec4(0.),xB=vec4(0.),yB=vec4(0.);
+  vec2 GS=vec2(0.);vec4 fA=vec4(0.),fB=vec4(0.),xA=vec4(0.),yA=vec4(0.),xB=vec4(0.),yB=vec4(0.);
   for(int i=0;i<40;i++){if(float(i)>=uNB)break;vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float q=b.z*b.z/d2;if(uK!=1.)q=pow(q,uK);vec2 g=-2.*uK*q*dv/d2;
     float gi=floor(b.w*.5);vec4 mA=vec4(equal(vec4(gi),vec4(0.,1.,2.,3.))),mB=vec4(equal(vec4(gi),vec4(4.,5.,6.,7.)));
-    float ri=max(b.z-uMW,0.);fi+=ri*ri/d2;fA+=q*mA;fB+=q*mB;xA+=g.x*mA;yA+=g.y*mA;xB+=g.x*mB;yB+=g.y*mB;lw+=q*(b.w-2.*gi);}
+    float sr=b.z*b.z*.25;GS+=-2.*b.z*b.z*dv/((d2+sr)*(d2+sr));fA+=q*mA;fB+=q*mB;xA+=g.x*mA;yA+=g.y*mA;xB+=g.x*mB;yB+=g.y*mB;lw+=q*(b.w-2.*gi);}
   // cut pieces: each group is its own body; groups join by a smooth union (p-norm), blended in by uSep
   {vec4 o=vec4(1.);f=dot(fA,o)+dot(fB,o);G=vec2(dot(xA,o)+dot(xB,o),dot(yA,o)+dot(yB,o));
    if(uSep>0.){float pe=1.+5.*uSep;vec4 sA=max(fA,vec4(1e-5)),sB=max(fB,vec4(1e-5));vec4 a5=pow(sA,vec4(pe-1.)),b5=pow(sB,vec4(pe-1.));
@@ -87,9 +87,9 @@ void main(){
   float m=smoothstep(-.7,.7,sd);
   float og=exp(-max(-sd,0.)/uGR);
   // rim: field band, plus a minimum pixel width right at the surface so small lobes keep the same rim as the body
-  // rim = inside the body but outside the same body with every ball shrunk by uMW px (an inner offset of the outline):
-  // same width on body, petals and necks, and nothing around balls that sit inside
-  float edge=uMW>0.?1.-smoothstep(.8,1.15,fi):max(1.-smoothstep(1.,uEB,f),(1.-smoothstep(0.,7.,sd))*(1.-smoothstep(1.,1.25,f)));
+  // rim = estimated px distance to the outline: log(field) over a softened gradient (no singularity at ball centres),
+  // so body, petals and necks share one width and balls sitting inside get no halo
+  float edge=uMW>0.?1.-smoothstep(0.,uMW,log(max(f,1e-4))*f/max(length(GS),1e-4)):max(1.-smoothstep(1.,uEB,f),(1.-smoothstep(0.,7.,sd))*(1.-smoothstep(1.,1.25,f)));
   vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
   // lamp under the finger/cursor: original shading, direction toward the lamp point, its pull fading softly with distance (uLH)
   vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));

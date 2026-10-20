@@ -46,7 +46,7 @@ const TEXTS = ['Call mom back', 'Light as a material', 'Oat milk run', 'Garden: 
 const P0 = {
   // core body: irregular parts (3 big, 7 small), one cohesive whole
   coreY:.8, coreScale:1, partDrift:.08, idleSpin:60,
-  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.7, onsetKick:260, agcFloor:.4, agcPeak:.35, puffK:90, bandPush:25, toneStretch:.35, shiver:14, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.2, onsetMin:.18, voiceWave:1.5, voiceWaveGap:450, toneSwirl:900, maxStretch:1.8, followMax:8, grabPull:16,
+  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.55, onsetKick:170, agcFloor:.4, agcPeak:.35, puffK:50, bandPush:12, toneStretch:.2, shiver:7, centerK:40, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.2, onsetMin:.18, voiceWave:1.5, voiceWaveGap:450, toneSwirl:400, maxStretch:1.8, followMax:8, grabPull:16,
   // field: 1 = original soft merge, higher = crisper pinch-off between parts
   sharp:1, smallLight:.5,
   // droplets off by default (drops:1 re-enables splash/tear)
@@ -62,7 +62,7 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimW:9, rimGain:1.6, birthPull:5};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v20')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v21')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -255,7 +255,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v20', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v21', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {
@@ -651,14 +651,15 @@ function frame(now) {
   if (recLike && now - lastOnset > P.onsetGap && flux > fluxAvg * P.onsetRatio + P.onsetMin) {
     lastOnset = now;
     for (const c of CORE) {
-      const hitK = c.band >= 0 ? FX[c.band] * 3 : flux * .3, ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1, kk = P.onsetKick * Math.min(1.5, hitK);
+      const hitK = c.band >= 0 ? FX[c.band] * 3 : 0, ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1, kk = P.onsetKick * Math.min(1.5, hitK);
       c.vx += ux / ud * kk; c.vy += uy / ud * kk;
     }
     if (P.voiceWave > 0 && now - lastVWave > P.voiceWaveGap) { lastVWave = now; addWave(cx, cy, P.voiceWave * Math.min(1, flux)); }
   }
   if (recLike) for (const c of CORE) {
     const ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1, bk = c.band >= 0 ? BS[c.band] : lvl;
-    const pf = P.puffK * puff * R * (c.band >= 0 ? 1 : .4) + P.bandPush * bk * R * (c.band >= 0 ? 1 : .2);
+    if (c.band < 0) continue;
+    const pf = P.puffK * puff * R + P.bandPush * bk * R;
     c.vx += ux / ud * pf * dt; c.vy += uy / ud * pf * dt;
     if (c.band >= 0) { const hs = (BS[4] + BS[5]) * .5 * P.shiver; c.vx += (Math.random() - .5) * hs * dt * 60; c.vy += (Math.random() - .5) * hs * dt * 60; }
   }
@@ -691,6 +692,10 @@ function frame(now) {
       c.ax += (BP.x - c.x) * P.birthPull * w; c.ay += (BP.y - c.y) * P.birthPull * w;
     }
   }
+  // keep the body centred: the mass centre is pulled (critically damped) to the anchor, voice can only reshape it
+  { let mx = 0, my = 0, mvx = 0, mvy = 0, ms = 0; for (const c of CORE) { const w = c.r * c.r; mx += c.x * w; my += c.y * w; mvx += c.vx * w; mvy += c.vy * w; ms += w; }
+    mx /= ms; my /= ms; mvx /= ms; mvy /= ms; const kc = P.centerK, cc = 2 * Math.sqrt(kc);
+    const ex = (cx - mx) * kc - mvx * cc, ey = (cy - my) * kc - mvy * cc; for (const c of CORE) { c.ax += ex; c.ay += ey; } }
   for (const c of CORE) {
     c.vx += c.ax * dt; c.vy += c.ay * dt; c.x += c.vx * dt; c.y += c.vy * dt;
     const ex = c.x - cx, ey = c.y - cy, ed = Math.hypot(ex, ey) || 1, lim = P.maxStretch * R;

@@ -52,7 +52,7 @@ const P0 = {
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:70, cutR:38, cutIn:5, cutOut:1.2, scarLife:1.4, scarSpeed:1, fastFlee:.25, orbCutSpeed:500, orbSplit:7, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:70, cutR:38, cutIn:5, cutOut:1.2, scarLife:1.4, scarSpeed:1, scarPush:.15, fastFlee:.25, orbCutSpeed:500, orbSplit:1.5, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
@@ -67,12 +67,17 @@ const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
 uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH;uniform vec4 uB[40];
-uniform vec4 uM[48];uniform float uPin[24];uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
+uniform vec4 uM[48];uniform float uPin[24];uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];uniform vec4 uS[16];uniform float uSW[16];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
   float f=0.;vec2 G=vec2(0.);float lw=0.;
   for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float q=pow(b.z*b.z/d2,uK);f+=q;G-=2.*uK*q*dv/d2;lw+=q*b.w;}
+  // finger scar: a thin rounded gap carved out of the fluid (like a finger dragged through water), closes as it fades
+  float cg=0.;vec2 cG=vec2(0.);
+  for(int i=0;i<16;i++){float w=uSW[i];if(w<=0.)continue;vec4 sg=uS[i];vec2 e=sg.zw-sg.xy;float t=clamp(dot(p-sg.xy,e)/max(dot(e,e),1.),0.,1.);vec2 dv=p-sg.xy-e*t;float d=max(length(dv),.5);
+    float a=w*.45,u=clamp((d-a)/(w-a),0.,1.),g=1.-u*u*(3.-2.*u);if(g>cg){cg=g;cG=-(6.*u*(1.-u)/(w-a))*dv/d;}}
+  G=G*(1.-cg)-f*cG;f*=1.-cg;
   float lwn=f>0.?lw/f:1.;
   float gn=max(length(G),1e-4);
   float sd=(f-1.)/gn;
@@ -89,7 +94,7 @@ void main(){
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
   float f2=0.,w2=0.,pw=0.;vec2 G2=vec2(0.);
   for(int i=0;i<48;i++){vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
-  float bw=f2>0.?w2/f2:0.;
+  f2*=1.-cg;float bw=f2>0.?w2/f2:0.;
   float m2=smoothstep(.98,1.02,f2);
   float e2=1.-smoothstep(1.,1.8,f2);
   // orbs lit by the same lamp as the core: rim on the lit side + highlight; pinned = filled lit sphere, no dark band
@@ -141,7 +146,7 @@ const ORBS = TEXTS.map(t => mkOrb(t));
 
 function makeView() {
   const cv = document.getElementById('gl'), g = cv.getContext('webgl', {alpha:false, antialias:false});
-  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(192), PN:new Float32Array(24), GL:new Float32Array(16), AU:new Float32Array([0, 0, 1, 0]), WU:new Float32Array(24)};
+  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(192), PN:new Float32Array(24), GL:new Float32Array(16), AU:new Float32Array([0, 0, 1, 0]), WU:new Float32Array(24), SU:new Float32Array(64), SW:new Float32Array(16)};
   if (!g) return v;
   const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); if (!g.getShaderParameter(o, g.COMPILE_STATUS)) console.error(g.getShaderInfoLog(o)); return o; };
   const pr = g.createProgram();
@@ -150,7 +155,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSW'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -333,7 +338,7 @@ function draw() {
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN);
-  g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
+  g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU); g.uniform4fv(L.uS, HV.SU); g.uniform1fv(L.uSW, HV.SW);
   g.drawArrays(g.TRIANGLES, 0, 3);
 }
 
@@ -423,7 +428,7 @@ function frame(now) {
   if (fing) {
     const lp = SCAR[SCAR.length - 1], same = lp && lp.id === swipe, mv = same ? Math.hypot(PX - lp.x, PY - lp.y) : 0;
     const v = same && mv > 0 ? mv / Math.max((now - lp.t) / 1000, 1e-3) : 0, sp = clamp(Math.max(v, psp) / P.fingerFast, 0, 2);
-    if (!same || mv > 2 || now - lp.t > 50) SCAR.push({x:PX, y:PY, t:now, id:swipe, w:P.cutR * (.7 + P.scarSpeed * sp)});
+    if (!same || mv > 2 || now - lp.t > 50) SCAR.push({x:PX, y:PY, t:now, id:swipe, w:P.cutR * P.scarSpeed * (.35 + .45 * sp)});
   }
   while (SCAR.length && (now - SCAR[0].t > P.scarLife * 1000 || SCAR.length > 120)) SCAR.shift();
   const SG = scarSegs(now), fastK = 1 - (1 - P.fastFlee) * clamp(psp / P.fingerFast, 0, 1);
@@ -519,7 +524,7 @@ function frame(now) {
     c.r = c.rf * R * P.coreScale * (1 + .05 * Math.sin(T * 1.3 + c.a * 2));
     if (c.x === null) { c.x = c.tx; c.y = c.ty; }
     cutT(c, c.r);
-    { const [ox, oy] = scarOut(c.tx, c.ty, c.r * .5, SG); c.tx += ox; c.ty += oy; }
+    { const [ox, oy] = scarOut(c.tx, c.ty, c.r * .5, SG); c.tx += ox * P.scarPush; c.ty += oy * P.scarPush; }
   }
   // onset: the voice "hits" a few petals outward
   if (recLike && lvl > avg + .12 && now - lastOnset > 150) {
@@ -535,10 +540,10 @@ function frame(now) {
     for (let j = 0; j < CORE.length; j++) {
       const o = CORE[j]; if (j === i) continue;
       const L0 = Math.hypot(c.tx - o.tx, c.ty - o.ty), dx = o.x - c.x, dy = o.y - c.y, d = Math.hypot(dx, dy) || 1;
-      if (d > L0 && !cutLink(c, o) && !(SG.length && segHit(c, o, SG))) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
+      if (d > L0 && !cutLink(c, o)) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
     }
     if (fing) fingerForce(c, c.r, fastK);
-    if (SG.length) { const [ox, oy] = scarOut(c.x, c.y, c.r * .5, SG); c.ax += ox * k * 3; c.ay += oy * k * 3; }
+    if (SG.length) { const [ox, oy] = scarOut(c.x, c.y, c.r * .5, SG); c.ax += ox * k * P.scarPush; c.ay += oy * k * P.scarPush; }
     { const dx = c.x - PX, dy = c.y - PY, d = Math.hypot(dx, dy) || 1, dm = (P.cutR + c.r) * cutS; if (d < dm) { c.ax += dx / d * (dm - d) * k * 2; c.ay += dy / d * (dm - d) * k * 2; } }
     if (hold) {
       const ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1;
@@ -693,6 +698,10 @@ function frame(now) {
     o.cx2 += o.cvx * dt; o.cy2 += o.cvy * dt;
   }
 
+  HV.SU.fill(0); HV.SW.fill(0);
+  { const st = Math.max(1, Math.ceil(SG.length / 16)); let j = 0;
+    for (let i = 0; i < SG.length && j < 16; i += st, j++) { const b = SG[Math.min(SG.length - 1, i + st - 1)]; let w = 1e9; for (let k2 = i; k2 < Math.min(SG.length, i + st); k2++) w = Math.min(w, SG[k2][4]);
+      HV.SU.set([SG[i][0], SG[i][1], b[2], b[3]], j * 4); HV.SW[j] = w; } }
   const M = HV.M, PN = HV.PN, GL = HV.GL, AU = HV.AU;
   M.fill(0); PN.fill(0); GL.fill(0); for (let i = 2; i < 16; i += 4) GL[i] = 1;
   let k = 0, gk = 0;

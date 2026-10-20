@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="icon" href="data:,">
+<title>Braindump — home7 · Home</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#000;color:#8A8A8A;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+.phone{position:relative;width:390px;height:844px;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+@media (max-width:500px){.phone{width:100vw;height:100vh;height:100dvh}}
+canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-action:none}
+.edge{position:absolute;left:0;right:0;height:50%;pointer-events:none}
+.edge.t{top:0;background:radial-gradient(ellipse 55% 40% at 50% 0%,rgba(255,255,255,.03),rgba(255,255,255,0))}
+.edge.b{bottom:0;background:radial-gradient(ellipse 55% 40% at 50% 100%,rgba(255,255,255,.03),rgba(255,255,255,0))}
+#msg{position:absolute;left:0;right:0;top:60%;text-align:center;font-size:13px;letter-spacing:.02em;color:#8A8A8A;opacity:0;transition:opacity .4s;pointer-events:none}
+#msg.on{opacity:1}
+#lbl{position:absolute;left:0;top:0;max-width:200px;font:400 13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.01em;text-align:center;color:rgba(255,255,255,.66);text-shadow:0 0 14px #000,0 0 2px #000;opacity:0;pointer-events:none}
+.panel{position:absolute;inset:0;background:#000;z-index:5;pointer-events:none;visibility:hidden;transition:transform .45s cubic-bezier(.2,.8,.2,1),visibility 0s .45s}
+.panel.open{pointer-events:auto;visibility:visible;transition:transform .45s cubic-bezier(.2,.8,.2,1),visibility 0s}
+#tl{transform:translateY(100%)}#tl.open{transform:none}
+#map{transform:translateY(-100%)}#map.open{transform:none}
+#list{padding:72px 32px 0;list-style:none}
+.row{margin-bottom:28px;cursor:pointer}
+.t{display:block;font-size:11px;color:#555;letter-spacing:.02em}
+.tx{display:block;font-size:16px;color:#D6D6D6;margin-top:4px;line-height:1.45;transition:color .4s}
+.row.on .tx{color:#FFFFFF}
+.bar{display:block;height:1px;margin-top:8px;background:#FFFFFF;transform:scaleX(0);transform-origin:left}
+.tip{position:absolute;left:0;top:0;max-width:200px;font-size:13px;line-height:1.35;color:#D0D0D0;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+.tip.on{opacity:1}
+#dev{position:fixed;right:12px;top:12px;width:300px;max-height:calc(100vh - 24px);overflow-y:auto;background:rgba(18,18,18,.82);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-radius:14px;padding:12px;font:11px system-ui,-apple-system,"Segoe UI",sans-serif;color:#bbb;z-index:1000;display:none}
+#dev.on{display:block}
+@media (max-width:500px){#dev{left:0;right:0;top:auto;bottom:0;width:auto;max-height:55vh;border-radius:14px 14px 0 0}}
+#dev summary{cursor:pointer;color:#ddd;padding:4px 0}
+#dev .pr{display:grid;grid-template-columns:104px 1fr 44px;align-items:center;gap:6px;margin:3px 0}
+#dev input{width:100%}
+#dev b{font-weight:400;text-align:right;color:#888}
+#dev button{background:#222;color:#ccc;border:0;border-radius:8px;padding:6px 8px;margin:4px 4px 0 0;font:inherit}
+#dev textarea{width:100%;height:120px;margin-top:6px;background:#111;color:#999;border:0;display:none}
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+  <canvas id="gl"></canvas>
+  <div class="edge t"></div>
+  <div class="edge b"></div>
+  <div id="msg"></div>
+  <div id="lbl"></div>
+  <section class="panel" id="tl"><ul id="list"></ul></section>
+  <section class="panel" id="map"><canvas id="mg"></canvas><div class="tip" id="tip"></div></section>
+</div>
+<div id="dev">
+  <div id="mics" style="color:#666;margin-bottom:6px">mic: off</div>
+  <div><button id="bCopy">Copy JSON</button><button id="bReset">Reset defaults</button><button id="bAdd">Add thought (N)</button><button id="bShout">Shout test</button><button id="bTog">Toggle thoughts (T)</button></div>
+  <textarea id="ta"></textarea>
+  <div id="groups"></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const TAU = Math.PI * 2, PH = $('#phone'), MSG = $('#msg'), LBL = $('#lbl'), TLEL = $('#tl'), MAPEL = $('#map'), LIST = $('#list'), TIP = $('#tip'), DEV = $('#dev');
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const rnd = Math.random;
+
+// tunable parameters; every frame reads P live. Groups: Core, Audio & Splash, Finger, Light, Thoughts, Layout
+const DEF = {
+  // Core: rest geometry and spring (9 balls: 1 center + 8 outer, fixed in code)
+  coreY: .80, coreR: 62, tension: 38, damping: 7, cohesion: 20, breath: .025, idleDrift: .08,
+  followK: 60, followDamp: 12, followMax: 48,
+  // Audio & Splash: mic bands push outer balls, onsets kick, loud level throws droplets
+  bandGain: 140, onsetKick: 180, splashTh: .55, splashRate: 18, dropMin: 4, dropMax: 9, splashSpeed: 160,
+  maxDrops: 24, dropDrag: 3, dropReturnDelay: .35, dropReturn: 55, volumeLoss: 1,
+  // Finger: fling on fast drag while holding, poke when idle
+  flingForce: .9, flingTh: 900, pokeForce: 2200,
+  // Light: lamp following the pointer (no audio link)
+  lightLag: .12, lightHeight: 140, rimPow: 3, rimBase: .35, rimLit: .65, specPow: 40, spec: .5, lightRange: 420, glow: .08,
+  // Thoughts: orb count, radii, rim, springs, repulsion, leaving, pins, label
+  maxThoughts: 8, rNew: 15, rOld: 8, rimNew: .16, rimOld: .035, slotK: 6, slotDamp: 4, repel: 900,
+  leaveSpeed: 18, leaveTime: 4, pinRim: .1, pinInner: .035, labelGap: 22,
+  // Layout: triangle of thoughts, apex newest
+  apexY: .5, topY: .1, yCurve: .7, spread: .4, xCurve: .8, jitter: .06,
+};
+const SCHEMA = [
+  ['Core', [['coreY', .5, .95, .01], ['coreR', 30, 100, 1], ['tension', 0, 120, 1], ['damping', 0, 30, .5], ['cohesion', 0, 80, 1], ['breath', 0, .1, .001], ['idleDrift', 0, .3, .005], ['followK', 0, 200, 1], ['followDamp', 0, 40, .5], ['followMax', 0, 120, 1]]],
+  ['Audio & Splash', [['bandGain', 0, 400, 1], ['onsetKick', 0, 500, 1], ['splashTh', 0, 1, .01], ['splashRate', 0, 60, .5], ['dropMin', 1, 15, .5], ['dropMax', 1, 20, .5], ['splashSpeed', 0, 400, 1], ['maxDrops', 0, 30, 1], ['dropDrag', 0, 10, .1], ['dropReturnDelay', 0, 2, .01], ['dropReturn', 0, 200, 1], ['volumeLoss', 0, 3, .05]]],
+  ['Finger', [['flingForce', 0, 3, .01], ['flingTh', 0, 3000, 10], ['pokeForce', 0, 6000, 10]]],
+  ['Light', [['lightLag', .01, 1, .01], ['lightHeight', 20, 400, 1], ['rimPow', .5, 8, .05], ['rimBase', 0, 1, .01], ['rimLit', 0, 2, .01], ['specPow', 2, 120, 1], ['spec', 0, 2, .01], ['lightRange', 100, 1000, 5], ['glow', 0, .3, .005]]],
+  ['Thoughts', [['maxThoughts', 1, 12, 1], ['rNew', 4, 30, .5], ['rOld', 2, 20, .5], ['rimNew', 0, .5, .005], ['rimOld', 0, .2, .005], ['slotK', .5, 20, .1], ['slotDamp', 0, 12, .1], ['repel', 0, 3000, 10], ['leaveSpeed', 0, 80, 1], ['leaveTime', .5, 12, .1], ['pinRim', 0, .4, .005], ['pinInner', 0, .2, .005], ['labelGap', 0, 60, 1]]],
+  ['Layout', [['apexY', .2, .8, .01], ['topY', 0, .4, .01], ['yCurve', .2, 2, .01], ['spread', 0, .6, .01], ['xCurve', .2, 2, .01], ['jitter', 0, .2, .005]]],
+];
+const P = Object.assign({}, DEF);
+try { const s = JSON.parse(localStorage.getItem('bd_tune_v7') || '{}'); for (const k in DEF) if (typeof s[k] === 'number') P[k] = s[k]; } catch (e) {}
+function save() { try { localStorage.setItem('bd_tune_v7', JSON.stringify(P)); } catch (e) {} }
+
+const THOUGHTS = ['Weekend trip with mom', 'App name should feel like light', 'Dentist moved to the 28th', 'Garden: tomatoes on the south side', "Grandpa's boat story", 'Buy oat milk', 'Lease renewal date', 'Pitch: one slide, one word', 'Call the plumber about the sink', 'Reread the chapter on rivers', 'Sketch the lamp from three angles', 'Ask about the Lisbon flights'];
+const NOTES = [
+  {time:'09:12', text:'Call mom about the weekend trip', dur:14},
+  {time:'Yesterday 22:31', text:'Pitch: the app name should feel like light', dur:22},
+  {time:'Yesterday 18:05', text:'Dentist moved to the 28th, confirm it', dur:8},
+  {time:'Mon 14:20', text:'Garden layout: tomatoes on the south side', dur:31},
+  {time:'Sun 11:02', text:"Grandpa's story about the boat in '74", dur:47},
+  {time:'Sun 09:40', text:'Buy oat milk, check the lease renewal date', dur:9}
+];
+const CL = [[.27, .3], [.73, .47], [.4, .74]];
+let sd = 7;
+const srnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+const NODES = [];
+CL.forEach(c => { for (let j = 0; j < 6; j++) {
+  const a = srnd() * TAU, r = .03 + srnd() * .08;
+  NODES.push({nx: c[0] + Math.cos(a) * r, ny: c[1] + Math.sin(a) * r, s: 4 + srnd() * 2, ph: srnd() * TAU, text: NOTES[j].text});
+} });
+
+const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
+const FS = `#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform vec2 uRes,uLP;uniform float uDpr,uGR,uLH,uRimPow,uRimBase,uRimLit,uSpecPow,uSpec,uRange,uGlow,uMap;
+uniform vec4 uB[48],uC[48];
+void main(){
+  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
+  float f=0.,ws=0.,wi=0.;vec2 G=vec2(0.);
+  for(int i=0;i<48;i++){
+    vec4 b=uB[i],c=uC[i];
+    if(b.z<=0.||c.z<=0.)continue;
+    vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float k=b.z*b.z*c.z/d2;
+    f+=k;G-=2.*k*dv/d2;ws+=k*c.x;wi+=k*c.y;
+  }
+  float gn=max(length(G),1e-4);
+  float sd=(f-1.)/gn;
+  float m=smoothstep(-.7,.7,sd);
+  float og=exp(-max(-sd,0.)/uGR);
+  float edge=1.-smoothstep(1.,1.8,f);
+  float fi=max(f,1e-4);
+  vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
+  vec3 Lv=normalize(vec3(uLP-p,uLH));
+  float d=length(uLP-p);
+  float att=1./(1.+d*d/(uRange*uRange));
+  float fr=pow(max(1.-N.z,1e-4),uRimPow);
+  float rim=edge*fr*(uRimBase+uRimLit*max(dot(N,Lv),0.))*att;
+  float sp=pow(max(dot(reflect(-Lv,N),vec3(0.,0.,1.)),1e-4),uSpecPow)*uSpec*edge*att;
+  if(uMap>.5){rim=edge*edge*.45;sp=0.;}
+  float c=mix(0.,.039+wi/fi+rim+sp+ws/fi*edge,m)+og*(1.-m)*uGlow;
+  gl_FragColor=vec4(vec3(c),1.);
+}`;
+
+let W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0, grS = 18, lvl = 0, avg = 0;
+let micState = 'idle', lastMic = '', an = null, ctxA = null, tbuf = null, freq = null;
+let rec = false, recId = null, recT0 = 0, shown = -1, lastOnset = -1e9, shoutUntil = -1e9, coreInit = false;
+const BS = [0, 0, 0, 0, 0, 0];
+const CB = [], DROPS = [], FLIES = [], ORBS = [], CORNER = [], PTR = new Map(), PROWS = [];
+const QX = {p: 0, v: 0}, QY = {p: 0, v: 0};
+let PX = 0, PY = 0, ppx = 0, ppy = 0, pvx = 0, pvy = 0, lastIn = -1e9, LPX = 0, LPY = 0;
+let lastFling = 0, lastTear = 0, spawnAcc = 0, seq = 0, nextIdx = 8, NB = 0;
+let drag = null, lastEmpty = -1e9, hidden = false, visFrom = 1, visTo = 1, visStart = -1e9, vis = 1;
+let textOrb = null, textShowT = -1e9, labA = 0;
+let mode = 0, mapLive = false, mapTimer = 0, wheelLock = 0, panelOn = false;
+for (let k = 0; k < 9; k++) CB.push({x: 0, y: 0, vx: 0, vy: 0, rx: 0, ry: 0, a: k ? (k - 1) * TAU / 8 : 0, p1: 9 + rnd() * 5, p2: 9 + rnd() * 5, ph: rnd() * TAU});
+
+function makeView(id) {
+  const cv = document.getElementById(id), g = cv.getContext('webgl', {alpha: false, antialias: false});
+  const v = {cv, gl: g, L: {}, B: new Float32Array(192), C: new Float32Array(192)};
+  if (!g) return v;
+  const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); return o; };
+  const pr = g.createProgram();
+  g.attachShader(pr, sh(g.VERTEX_SHADER, VS)); g.attachShader(pr, sh(g.FRAGMENT_SHADER, FS));
+  g.linkProgram(pr); g.useProgram(pr);
+  g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
+  g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+  const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
+  ['uRes', 'uDpr', 'uLP', 'uLH', 'uGR', 'uRimPow', 'uRimBase', 'uRimLit', 'uSpecPow', 'uSpec', 'uRange', 'uGlow', 'uMap', 'uB', 'uC'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  return v;
+}
+const HV = makeView('gl'), MV = makeView('mg');
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2); W = PH.clientWidth; H = PH.clientHeight;
+  [HV, MV].forEach(v => {
+    v.cv.width = Math.round(W * DPR); v.cv.height = Math.round(H * DPR);
+    v.cv.style.width = W + 'px'; v.cv.style.height = H + 'px';
+  });
+}
+window.addEventListener('resize', resize);
+resize();
+
+// microphone: one getUserMedia on first press of the core; fake level as fallback
+function startMic() {
+  if (micState !== 'idle') return;
+  micState = 'pending';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micState = 'off'; return; }
+  navigator.mediaDevices.getUserMedia({audio: true}).then(st => {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctxA = new AC();
+    an = ctxA.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = .8;
+    ctxA.createMediaStreamSource(st).connect(an);
+    tbuf = new Float32Array(an.fftSize); freq = new Uint8Array(an.frequencyBinCount);
+    micState = 'on';
+  }).catch(e => { micState = e && e.name === 'NotAllowedError' ? 'denied' : 'off'; });
+}
+function micLevels() {
+  an.getFloatTimeDomainData(tbuf);
+  let s = 0; for (let i = 0; i < tbuf.length; i++) s += tbuf[i] * tbuf[i];
+  const rms = Math.sqrt(s / tbuf.length), gate = rms < .02;
+  const L = gate ? 0 : Math.sqrt(Math.min(1, rms / .3));
+  an.getByteFrequencyData(freq);
+  const hz = ctxA.sampleRate / an.fftSize, out = [];
+  for (let k = 0; k < 6; k++) {
+    const i0 = Math.max(1, Math.floor(80 * Math.pow(50, k / 6) / hz)), i1 = Math.max(i0, Math.min(freq.length - 1, Math.ceil(80 * Math.pow(50, (k + 1) / 6) / hz)));
+    let sum = 0; for (let i = i0; i <= i1; i++) sum += freq[i];
+    out.push(gate ? 0 : Math.min(1, Math.sqrt(sum / (i1 - i0 + 1) / 255) * 1.4));
+  }
+  return {lvl: L, bands: out};
+}
+
+// recording: held down on the core
+function startRec(id) { rec = true; recId = id; recT0 = performance.now(); shown = -1; MSG.classList.add('on'); startMic(); }
+function stopRec() { rec = false; MSG.classList.remove('on'); addFly(); }
+function addFly() { FLIES.push({t0: performance.now()}); }
+function springXY(s, tg, k, c, dt) { const a = (tg - s.p) * k - s.v * c; s.v += a * dt; s.p += s.v * dt; }
+function coreBase() { return {x: W / 2, y: H * P.coreY}; }
+
+// thoughts: orbs, ranks, pins
+function addOrb(x, y, text = THOUGHTS[nextIdx++ % THOUGHTS.length]) {
+  const o = {id: ++seq, text, x: x ?? W / 2, y: y ?? H * P.apexY, lx: W / 2, ly: H * P.apexY, vx: 0, vy: 0, ph: rnd() * TAU,
+    pin: false, px: 0, py: 0, gx: 0, gy: 0, grab: false, state: 'ok', rank: 0, t: 0, r: P.rNew, ls: 1,
+    flashT: -1e9, leaveT: 0, init: x !== undefined, dead: false};
+  ORBS.push(o); return o;
+}
+function togglePin(o) { o.pin = !o.pin; o.px = o.x; o.py = o.y; o.flashT = performance.now(); }
+function hitOrb(p) {
+  for (let i = ORBS.length - 1; i >= 0; i--) {
+    const o = ORBS[i];
+    if (o.state === 'ok' && Math.hypot(p.x - o.x, p.y - o.y - 40 * (1 - vis)) < o.r + 14) return o;
+  }
+  return null;
+}
+const ease = p => p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+function visNow(now) { return visFrom + (visTo - visFrom) * ease(clamp((now - visStart) / 900, 0, 1)); }
+function toggleThoughts(now) { const cur = visNow(now); hidden = !hidden; visFrom = cur; visTo = hidden ? 0 : 1; visStart = now; if (hidden) textShowT = -1e9; }
+function togglePanel() { panelOn = !panelOn; DEV.classList.toggle('on', panelOn); }
+
+// nav (from home5-B): drag/wheel/arrows open map (top) or timeline (bottom)
+function setMode(m) {
+  if (m === mode) return;
+  if (mode === 1 && m !== 1) { clearTimeout(mapTimer); mapTimer = setTimeout(() => mapLive = false, 500); }
+  if (m === 1) { mapLive = true; clearTimeout(mapTimer); }
+  mode = m; TIP.classList.remove('on');
+  MAPEL.classList.toggle('open', m === 1); TLEL.classList.toggle('open', m === -1);
+}
+function gesture(dir) { if (mode === 0) setMode(dir); else if (dir === -mode) setMode(0); }
+function mapTap(x, y) {
+  const hit = NODES.find(n => Math.hypot(n.px - x, n.py - y) < 22);
+  if (!hit) { TIP.classList.remove('on'); return; }
+  TIP.textContent = hit.text; TIP.style.transform = `translate(${hit.px + 14}px,${hit.py - 24}px)`; TIP.classList.add('on');
+}
+NOTES.forEach(n => {
+  const li = document.createElement('li');
+  li.className = 'row';
+  li.innerHTML = `<span class="t">${n.time}</span><span class="tx">${n.text}</span><span class="bar"></span>`;
+  li.onclick = () => play(li, n.dur);
+  LIST.appendChild(li);
+});
+function play(li, dur) {
+  const was = li.classList.contains('on');
+  LIST.querySelectorAll('.row.on').forEach(r => {
+    r.classList.remove('on');
+    const b = r.querySelector('.bar'); b.style.transition = 'none'; b.style.transform = 'scaleX(0)';
+  });
+  if (was) return;
+  const b = li.querySelector('.bar');
+  void b.offsetWidth;
+  li.classList.add('on'); b.style.transition = `transform ${dur}s linear`; b.style.transform = 'scaleX(1)';
+}
+
+// pointer
+const pt = e => { const r = PH.getBoundingClientRect(); return {x: e.clientX - r.left, y: e.clientY - r.top}; };
+PH.addEventListener('pointerdown', e => {
+  const p = pt(e), now = performance.now();
+  PTR.set(e.pointerId, p); lastIn = now; PX = p.x; PY = p.y;
+  if (PTR.size === 2) { if (drag && drag.o) drag.o.grab = false; drag = null; toggleThoughts(now); return; }
+  if (e.target.closest('.row') || e.target.closest('#tip') || mode !== 0) { drag = {id: e.pointerId, x0: p.x, y0: p.y, t0: now, moved: 0, o: null, lp: 0}; return; }
+  if (p.x > W - 56 && p.y < 56) {
+    CORNER.push(now); while (CORNER.length && now - CORNER[0] > 700) CORNER.shift();
+    if (CORNER.length >= 3) { CORNER.length = 0; togglePanel(); }
+    return;
+  }
+  const cb = coreBase();
+  if (!rec && Math.hypot(p.x - cb.x, p.y - cb.y) < 90) { startRec(e.pointerId); return; }
+  const o = vis > .5 && !hidden ? hitOrb(p) : null;
+  if (o) {
+    o.grab = true; o.gx = p.x; o.gy = p.y; textOrb = o;
+    drag = {id: e.pointerId, x0: p.x, y0: p.y, t0: now, moved: 0, o, lp: setTimeout(() => {
+      if (drag && drag.o === o && drag.moved <= 8) { togglePin(o); drag.lp = -1; }
+    }, 500)};
+    return;
+  }
+  if (now - lastEmpty < 300) { lastEmpty = -1e9; toggleThoughts(now); return; }
+  lastEmpty = now;
+  drag = {id: e.pointerId, x0: p.x, y0: p.y, t0: now, moved: 0, o: null, lp: 0};
+});
+window.addEventListener('pointermove', e => {
+  const p = pt(e); lastIn = performance.now(); PX = p.x; PY = p.y;
+  if (PTR.has(e.pointerId)) PTR.set(e.pointerId, p);
+  if (!drag || e.pointerId !== drag.id) return;
+  drag.moved = Math.max(drag.moved, Math.hypot(p.x - drag.x0, p.y - drag.y0));
+  if (drag.o) { drag.o.gx = p.x; drag.o.gy = p.y; }
+});
+function endPtr(e) {
+  PTR.delete(e.pointerId);
+  if (rec && e.pointerId === recId) { stopRec(); return; }
+  if (!drag || e.pointerId !== drag.id) return;
+  const p = pt(e), now = performance.now(), d = drag;
+  drag = null;
+  if (d.lp > 0) clearTimeout(d.lp);
+  if (d.o) {
+    const o = d.o; o.grab = false;
+    if (o.pin) { o.px = o.x; o.py = o.y; }
+    textShowT = now - d.t0 < 300 && d.moved < 10 ? now : -1e9;
+    return;
+  }
+  const dx = p.x - d.x0, dy = p.y - d.y0;
+  if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) gesture(dy > 0 ? 1 : -1);
+  else if (mode === 1 && d.moved < 8) mapTap(d.x0, d.y0);
+}
+window.addEventListener('pointerup', endPtr);
+window.addEventListener('pointercancel', e => {
+  PTR.delete(e.pointerId);
+  if (rec && e.pointerId === recId) stopRec();
+  if (drag && e.pointerId === drag.id) { if (drag.o) drag.o.grab = false; drag = null; }
+});
+PH.addEventListener('wheel', e => {
+  e.preventDefault();
+  const now = performance.now();
+  if (now - wheelLock < 500 || rec) return;
+  wheelLock = now; gesture(e.deltaY > 0 ? 1 : -1);
+}, {passive: false});
+window.addEventListener('keydown', e => {
+  const k = e.key;
+  if (k === 'ArrowDown') gesture(1);
+  else if (k === 'ArrowUp') gesture(-1);
+  else if (k === 't' || k === 'T') toggleThoughts(performance.now());
+  else if (k === 'n' || k === 'N') addFly();
+  else if (k === 'd' || k === 'D') togglePanel();
+});
+
+// drops: droplets thrown off the core, return to it after a delay
+function dropBall(x, y, vx, vy, r) { if (DROPS.length < P.maxDrops) DROPS.push({x, y, vx, vy, r, age: 0}); }
+function splash(b, cx, cy, sp) {
+  const a = Math.atan2(b.y - cy, b.x - cx) + (rnd() * 2 - 1) * .61;
+  dropBall(b.x, b.y, Math.cos(a) * sp, Math.sin(a) * sp, P.dropMin + rnd() * (P.dropMax - P.dropMin));
+}
+const outer = () => CB[1 + Math.floor(rnd() * 8)];
+
+// shared field buffers (HV) and per-ball push: glow in C.x, inner light in C.y, alpha in C.z
+function pushBall(x, y, r, glow, inn, a) {
+  if (NB >= 48 || r <= 0 || a <= 0) return;
+  const i = NB * 4;
+  HV.B[i] = x; HV.B[i + 1] = y; HV.B[i + 2] = r;
+  HV.C[i] = glow; HV.C[i + 1] = inn; HV.C[i + 2] = a;
+  NB++;
+}
+function draw(v, gr, map) {
+  const g = v.gl; if (!g) return;
+  const L = v.L;
+  g.viewport(0, 0, v.cv.width, v.cv.height);
+  g.uniform2f(L.uRes, v.cv.width, v.cv.height); g.uniform1f(L.uDpr, DPR);
+  g.uniform2f(L.uLP, LPX, LPY); g.uniform1f(L.uLH, P.lightHeight); g.uniform1f(L.uGR, gr);
+  g.uniform1f(L.uRimPow, P.rimPow); g.uniform1f(L.uRimBase, P.rimBase); g.uniform1f(L.uRimLit, P.rimLit);
+  g.uniform1f(L.uSpecPow, P.specPow); g.uniform1f(L.uSpec, P.spec); g.uniform1f(L.uRange, P.lightRange);
+  g.uniform1f(L.uGlow, P.glow); g.uniform1f(L.uMap, map ? 1 : 0);
+  g.uniform4fv(L.uB, v.B); g.uniform4fv(L.uC, v.C);
+  g.drawArrays(g.TRIANGLES, 0, 3);
+}
+
+// panel
+function fmt(v) { return String(+v.toFixed(3)); }
+function buildPanel() {
+  const G = $('#groups');
+  SCHEMA.forEach(([name, rows], gi) => {
+    const d = document.createElement('details'); d.open = gi === 0;
+    d.innerHTML = `<summary>${name}</summary>`;
+    rows.forEach(([k, mn, mx, st]) => {
+      const r = document.createElement('div'), i = document.createElement('input'), b = document.createElement('b');
+      r.className = 'pr'; r.innerHTML = `<span>${k}</span>`;
+      i.type = 'range'; i.min = mn; i.max = mx; i.step = st;
+      i.oninput = () => { P[k] = +i.value; b.textContent = fmt(P[k]); save(); };
+      r.append(i, b); d.appendChild(r);
+      PROWS.push({k, i, b});
+    });
+    G.appendChild(d);
+  });
+  syncPanel();
+}
+function syncPanel() { PROWS.forEach(r => { r.i.value = P[r.k]; r.b.textContent = fmt(P[r.k]); }); }
+$('#bCopy').onclick = () => {
+  const s = JSON.stringify(P, null, 1), ta = $('#ta');
+  const fb = () => { ta.style.display = 'block'; ta.value = s; ta.select(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(s).catch(fb); else fb();
+};
+$('#bReset').onclick = () => { Object.assign(P, DEF); syncPanel(); save(); };
+$('#bAdd').onclick = () => addFly();
+$('#bShout').onclick = () => { shoutUntil = performance.now() + 1200; };
+$('#bTog').onclick = () => toggleThoughts(performance.now());
+
+// main loop
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 1 / 30); last = now; T += dt;
+  br = .5 - .5 * Math.cos(T * TAU / 5.5);
+  vis = visNow(now);
+  const shout = now < shoutUntil, active = rec || shout;
+  const cb = coreBase(), R = P.coreR;
+
+  // pointer velocity
+  const rvx = (PX - ppx) / dt, rvy = (PY - ppy) / dt;
+  pvx += (rvx - pvx) * Math.min(1, dt * 12); pvy += (rvy - pvy) * Math.min(1, dt * 12);
+  ppx = PX; ppy = PY;
+
+  // audio: real mic when on, fake level otherwise, shout test forces full
+  let vt = 0, bt = [0, 0, 0, 0, 0, 0];
+  if (shout) { vt = 1; bt = [1, 1, 1, 1, 1, 1]; }
+  else if (rec) {
+    if (micState === 'on') { const a = micLevels(); vt = a.lvl; bt = a.bands; }
+    else {
+      vt = clamp(.5 + .5 * (.55 * Math.sin(T * 1.7) + .3 * Math.sin(T * 3.9 + 1.3) + .15 * Math.sin(T * 7.3) + (rnd() * 2 - 1) * .3), 0, 1);
+      bt = bt.map((_, k) => .5 + .5 * Math.sin(T * (2 + .4 * k) + k * 2.3));
+    }
+  }
+  lvl += (vt - lvl) * Math.min(1, dt * 6);
+  avg += (lvl - avg) * Math.min(1, dt / .3);
+  for (let k = 0; k < 6; k++) BS[k] += (bt[k] - BS[k]) * Math.min(1, dt * 8);
+  grS += ((18 + 16 * lvl * (active ? 1 : 0)) - grS) * .12;
+  if (rec) {
+    const s = Math.floor((now - recT0) / 1000);
+    if (s !== shown) { shown = s; MSG.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+  }
+  if (micState !== lastMic) { lastMic = micState; $('#mics').textContent = 'mic: ' + (micState === 'on' ? 'on' : micState === 'denied' ? 'denied' : 'off'); }
+
+  // core follow: spring toward pointer, offset clamped to followMax
+  const hold = rec;
+  let tgx = 0, tgy = 0;
+  if (hold) { const dx = PX - cb.x, dy = PY - cb.y, d = Math.hypot(dx, dy) || 1, s = Math.min(1, P.followMax / d); tgx = dx * s; tgy = dy * s; }
+  springXY(QX, tgx, P.followK, P.followDamp, dt); springXY(QY, tgy, P.followK, P.followDamp, dt);
+  const cx = cb.x + QX.p, cy = cb.y + QY.p;
+  if (!coreInit) { coreInit = true; CB.forEach(b => { b.x = cx; b.y = cy; }); }
+
+  // onsets kick outer balls, loud level throws droplets
+  if (active) {
+    if (lvl > avg + .12 && now - lastOnset > 150) {
+      lastOnset = now;
+      const n = 2 + (rnd() < .5 ? 1 : 0);
+      for (let i = 0; i < n; i++) { const b = outer(), s = P.onsetKick * lvl; b.vx += Math.cos(b.a) * s; b.vy += Math.sin(b.a) * s; }
+    }
+    if (lvl > P.splashTh) spawnAcc += P.splashRate * (lvl - P.splashTh) / (1 - P.splashTh) * dt;
+    while (spawnAcc >= 1) { spawnAcc -= 1; splash(outer(), cx, cy, P.splashSpeed * lvl); }
+  }
+
+  // finger: fling while holding, poke + tear when idle near the core
+  const sp = Math.hypot(pvx, pvy), dp = Math.hypot(PX - cx, PY - cy);
+  const pa = Math.atan2(PY - cy, PX - cx);
+  const ds = CB.slice(1).map((b, j) => ({j, d: Math.abs(Math.atan2(Math.sin(pa - b.a), Math.cos(pa - b.a)))})).sort((u, v) => u.d - v.d);
+  const fl0 = ds[0].j, fl1 = ds[1].j;
+  const poke = !rec && dp < 1.7 * R && sp > 40, pokeK = poke ? Math.min(1, sp / 300) : 0;
+  if (hold && sp > P.flingTh && now - lastFling > 150) {
+    lastFling = now;
+    const n = 1 + Math.floor(rnd() * 3), a = Math.atan2(pvy, pvx), v = Math.min(sp * .4, 500);
+    for (let i = 0; i < n; i++) dropBall(cx + Math.cos(a) * R * .5, cy + Math.sin(a) * R * .5, Math.cos(a) * v, Math.sin(a) * v, P.dropMin + rnd() * (P.dropMax - P.dropMin));
+  }
+  if (poke && sp > P.flingTh && now - lastTear > 250) {
+    lastTear = now;
+    const n = 1 + (rnd() < .5 ? 1 : 0);
+    for (let i = 0; i < n; i++) { const b = outer(); dropBall(b.x, b.y, pvx * .3, pvy * .3, P.dropMin + rnd() * (P.dropMax - P.dropMin)); }
+  }
+
+  // core: damped springs, breathing rest offsets, drift, cohesion, bands, fling, poke
+  const rd = (.38 + P.breath * Math.sin(T * TAU / 5.5)) * R, dr = P.idleDrift * R, c0 = CB[0];
+  c0.rx = cx; c0.ry = cy;
+  for (let k = 1; k < 9; k++) {
+    const b = CB[k];
+    b.rx = cx + Math.cos(b.a) * rd + Math.sin(T * TAU / b.p1 + b.ph) * dr;
+    b.ry = cy + Math.sin(b.a) * rd + Math.cos(T * TAU / b.p2 + b.ph) * dr;
+  }
+  const pokeK2 = pokeK;
+  for (let k = 0; k < 9; k++) {
+    const b = CB[k];
+    let ax = -P.tension * (b.x - b.rx) - P.damping * b.vx, ay = -P.tension * (b.y - b.ry) - P.damping * b.vy;
+    if (k) {
+      const dx = c0.x - b.x, dy = c0.y - b.y, d = Math.hypot(dx, dy) || 1, ex = Math.max(0, d - .5 * R) * P.cohesion;
+      ax += dx / d * ex; ay += dy / d * ex;
+      const j = k - 1, ca = Math.cos(b.a), sa = Math.sin(b.a), bd = active ? P.bandGain * BS[j % 6] : 0;
+      ax += ca * bd; ay += sa * bd;
+      if (hold && (j === fl0 || j === fl1)) { ax += P.flingForce * pvx; ay += P.flingForce * pvy; }
+      if (poke) {
+        const qx = b.x - PX, qy = b.y - PY, qd = Math.max(Math.hypot(qx, qy), 12), f = Math.min(P.pokeForce / qd, 400) * pokeK2;
+        ax += qx / qd * f; ay += qy / qd * f;
+      }
+    }
+    b.vx += ax * dt; b.vy += ay * dt;
+  }
+  for (const b of CB) { b.x += b.vx * dt; b.y += b.vy * dt; }
+
+  // droplets: drag, delayed return to core, merge inside .7R; volume loss shrinks the core
+  let vol = 0;
+  for (let i = DROPS.length - 1; i >= 0; i--) {
+    const d = DROPS[i]; d.age += dt; vol += d.r * d.r;
+    const dk = Math.exp(-P.dropDrag * dt); d.vx *= dk; d.vy *= dk;
+    if (d.age > P.dropReturnDelay) { d.vx += (cx - d.x) * P.dropReturn * dt; d.vy += (cy - d.y) * P.dropReturn * dt; }
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    if ((d.age > P.dropReturnDelay && Math.hypot(cx - d.x, cy - d.y) < .7 * R) || d.age > 10) DROPS.splice(i, 1);
+  }
+  const Re = Math.max(.75 * R, Math.sqrt(Math.max(0, R * R - P.volumeLoss * vol * .6))), s = Re / R;
+  NB = 0; HV.B.fill(0); HV.C.fill(0);
+  pushBall(c0.x, c0.y, .62 * R * s, 0, 0, 1);
+  for (let k = 1; k < 9; k++) pushBall(CB[k].x, CB[k].y, .42 * R * s, 0, 0, 1);
+  for (const d of DROPS) pushBall(d.x, d.y, d.r, 0, 0, 1);
+
+  // release droplets: pinch off the core, then fly to the apex and become a new thought
+  const ax0 = W / 2, ay0 = P.apexY * H;
+  for (let i = FLIES.length - 1; i >= 0; i--) {
+    const f = FLIES[i], e = now - f.t0;
+    if (e < 300) { pushBall(cx, cy - R * (.55 + .4 * e / 300), 10, 0, 0, 1); continue; }
+    const u = (e - 300) / 600;
+    if (u >= 1) { FLIES.splice(i, 1); addOrb(ax0, ay0); continue; }
+    const q = 1 - Math.pow(1 - u, 3);
+    pushBall(lerp(cx, ax0, q), lerp(cy - R * .95, ay0, q), lerp(10, P.rNew, q), 0, 0, 1);
+  }
+
+  // thought layout: rank by creation (newest first), overflow leaves upward
+  const live = ORBS.filter(o => o.state === 'ok' && !o.pin).sort((a, b) => b.id - a.id);
+  let rk = 0;
+  for (const o of live) {
+    if (rk >= P.maxThoughts) { o.state = 'leave'; o.leaveT = now; o.vx = 0; o.vy = -P.leaveSpeed; o.grab = false; continue; }
+    o.rank = rk++;
+  }
+  const n = rk;
+  for (const o of ORBS) if (o.state === 'ok' && !o.pin) {
+    const t = n > 1 ? o.rank / (n - 1) : 0;
+    o.t = t;
+    const side = o.rank % 2 ? -1 : 1, hr = .5 + .5 * Math.abs(Math.sin((o.rank + 1) * 12.9898));
+    o.lx = W / 2 + side * P.spread * W * Math.pow(t, P.xCurve) * hr;
+    o.ly = lerp(P.apexY, P.topY, Math.pow(t, P.yCurve)) * H;
+  }
+
+  // thoughts: springs (slot / pinned / dragged), soft repulsion, leave drift
+  for (const o of ORBS) {
+    const jx = Math.sin(T * TAU / 20 + o.ph) * P.jitter * W, jy = Math.cos(T * TAU / 23 + o.ph * 1.3) * P.jitter * W * .7;
+    if (o.state === 'leave') {
+      const u = (now - o.leaveT) / (P.leaveTime * 1000);
+      o.ls = 1 - u; o.dead = u >= 1;
+      o.x += o.vx * dt; o.y += o.vy * dt;
+    } else {
+      o.ls = 1;
+      if (!o.init) { o.init = true; o.x = o.lx; o.y = o.ly; }
+      let tx = o.lx + jx, ty = o.ly + jy, k = P.slotK, c = P.slotDamp;
+      if (o.pin) { tx = o.px + jx * .3; ty = o.py + jy * .3; }
+      if (o.grab) { tx = o.gx; ty = o.gy; k = 120; c = 16; }
+      o.vx += ((tx - o.x) * k - o.vx * c) * dt; o.vy += ((ty - o.y) * k - o.vy * c) * dt;
+      o.x += o.vx * dt; o.y += o.vy * dt;
+    }
+  }
+  const AL = ORBS.filter(o => o.state === 'ok');
+  for (let a = 0; a < AL.length; a++) for (let b = a + 1; b < AL.length; b++) {
+    const p = AL[a], q = AL[b], dx = q.x - p.x, dy = q.y - p.y, d = Math.hypot(dx, dy) || 1;
+    const rr = (p.r + q.r) / 2, dm = 2.4 * rr;
+    if (d < dm) {
+      const f = P.repel * (dm - d) / dm / 12 * dt;
+      p.vx -= dx / d * f; p.vy -= dy / d * f; q.vx += dx / d * f; q.vy += dy / d * f;
+    }
+  }
+
+  // orb radii, rim, inner light; pushed into the shared field (sink + dim with vis)
+  for (const o of ORBS) {
+    const bre = 1 + .03 * Math.sin(T * .9 + o.ph);
+    o.r = lerp(P.rNew, P.rOld, o.t) * bre * o.ls;
+    const gl = (o.pin ? P.pinRim : o.state === 'leave' ? P.rimOld * o.ls : lerp(P.rimNew, P.rimOld, o.t)) + .2 * Math.max(0, 1 - (now - o.flashT) / 400);
+    const inn = o.pin ? P.pinInner : -.012 * o.t;
+    const y = o.y + 40 * (1 - vis), sp2 = Math.hypot(o.vx, o.vy) || 1, so = Math.min(.4 * o.r, sp2 * .03);
+    if (o.dead) { o.dead = true; continue; }
+    pushBall(o.x, y, o.r, gl, inn, vis);
+    if (so > .5) pushBall(o.x + o.vx / sp2 * so, y + o.vy / sp2 * so, o.r * .8, gl, inn, vis);
+  }
+  for (let i = ORBS.length - 1; i >= 0; i--) if (ORBS[i].dead) { if (ORBS[i] === textOrb) textOrb = null; ORBS.splice(i, 1); }
+
+  // label: while dragging (after 10px) or 2.5s after a tap, centred above the orb
+  const showing = !!textOrb && !hidden && ((drag && drag.o === textOrb && drag.moved > 10) || now - textShowT < 2500);
+  labA = clamp(labA + (showing ? 1 : -1) * dt / .22, 0, 1);
+  if (textOrb && labA > 0) {
+    const o = textOrb;
+    if (LBL.textContent !== o.text) LBL.textContent = o.text;
+    const y = o.y + 40 * (1 - vis) - o.r - P.labelGap - 6 * (1 - labA);
+    LBL.style.opacity = labA; LBL.style.transform = `translate(${o.x}px,${y}px) translate(-50%,-100%)`;
+  } else LBL.style.opacity = 0;
+
+  // light: lamp on the pointer, critically smooth; eases to default after 6s idle
+  const idle = now - lastIn > 6000;
+  const lxT = idle ? W * .25 : PX, lyT = idle ? H * .35 : PY;
+  const la = 1 - Math.exp(-dt / (idle ? P.lightLag * 8 : P.lightLag));
+  LPX += (lxT - LPX) * la; LPY += (lyT - LPY) * la;
+
+  draw(HV, grS, false);
+  if (mapLive) {
+    MV.B.fill(0); MV.C.fill(0);
+    NODES.forEach((q, i) => {
+      q.px = q.nx * W + Math.sin(T * .6 + q.ph) * 3; q.py = q.ny * H + Math.cos(T * .5 + q.ph) * 3;
+      MV.B.set([q.px, q.py, q.s, 0], i * 4); MV.C.set([0, 0, 1, 0], i * 4);
+    });
+    draw(MV, 18, true);
+  }
+  requestAnimationFrame(frame);
+}
+
+// init: 8 thoughts (index 0 newest), dev panel, start
+for (let i = 7; i >= 0; i--) addOrb(undefined, undefined, THOUGHTS[i]);
+buildPanel();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -52,7 +52,7 @@ const P0 = {
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:70, cutR:38, cutIn:5, cutOut:1.2, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:70, cutR:38, cutIn:5, cutOut:1.2, scarLife:1.4, scarSpeed:1.5, fastFlee:.25, orbCutSpeed:500, orbSplit:7, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
@@ -367,6 +367,35 @@ function fingerForce(o, r, scale) {
 
 // finger cut: held finger is a hole in the water; targets near it move out, links across it break
 let cutS = 0;
+const SCAR = [];
+function scarW(p, now) { const a = clamp((now - p.t) / (P.scarLife * 1000), 0, 1); return p.w * (1 - a * a * (3 - 2 * a)); }
+function scarSegs(now) {
+  const out = [];
+  for (let i = 1; i < SCAR.length; i++) { const a = SCAR[i - 1], b = SCAR[i]; if (a.id !== b.id) continue; const w = Math.min(scarW(a, now), scarW(b, now)); if (w > 1) out.push([a.x, a.y, b.x, b.y, w]); }
+  return out;
+}
+// push (x,y) of radius r out of every scar, sideways from the cut line
+function scarOut(x, y, r, SG) {
+  let ox = 0, oy = 0;
+  for (const [ax, ay, bx, by, w] of SG) {
+    const ex = bx - ax, ey = by - ay, L = ex * ex + ey * ey || 1, t = clamp(((x - ax) * ex + (y - ay) * ey) / L, 0, 1);
+    const qx = ax + ex * t, qy = ay + ey * t, d = Math.hypot(x - qx, y - qy), dm = w + r;
+    if (d >= dm) continue;
+    let nx = -ey, ny = ex; const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+    if ((x - qx) * nx + (y - qy) * ny < 0) { nx = -nx; ny = -ny; }
+    const m = dm - d; if (m > Math.hypot(ox, oy)) { ox = nx * m; oy = ny * m; }
+  }
+  return [ox, oy];
+}
+function segHit(a, b, SG) {
+  for (const [ax, ay, bx, by, w] of SG) {
+    // distance between segments a-b and scar (sampled)
+    for (let k = 0; k <= 4; k++) { const t = k / 4, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+      const ex = bx - ax, ey = by - ay, L = ex * ex + ey * ey || 1, u = clamp(((x - ax) * ex + (y - ay) * ey) / L, 0, 1);
+      if (Math.hypot(x - ax - ex * u, y - ay - ey * u) < w * .8) return true; }
+  }
+  return false;
+}
 function cutT(o, r) {
   if (cutS < .01) return;
   const dx = o.tx - PX, dy = o.ty - PY, d = Math.hypot(dx, dy), dm = (P.cutR + r) * cutS;
@@ -389,6 +418,9 @@ function frame(now) {
   const recLike = rec || now < shoutEnd, hold = rec;
   const fing = !!(swipe && pts.has(swipe.id));
   cutS += ((fing ? 1 : 0) - cutS) * Math.min(1, dt * (fing ? P.cutIn : P.cutOut));
+  if (fing) { const sp = clamp(psp / P.fingerFast, 0, 2); SCAR.push({x:PX, y:PY, t:now, id:swipe, w:P.cutR * P.scarSpeed * sp}); }
+  while (SCAR.length && (now - SCAR[0].t > P.scarLife * 1000 || SCAR.length > 120)) SCAR.shift();
+  const SG = scarSegs(now), fastK = 1 - (1 - P.fastFlee) * clamp(psp / P.fingerFast, 0, 1);
 
   // level: shout test, real mic when on, fake level otherwise (FROM core6)
   let vt = 0, bt = [0, 0, 0, 0, 0, 0];
@@ -477,6 +509,7 @@ function frame(now) {
     c.r = c.rf * R * P.coreScale * (1 + .05 * Math.sin(T * 1.3 + c.a * 2));
     if (c.x === null) { c.x = c.tx; c.y = c.ty; }
     cutT(c, c.r);
+    { const [ox, oy] = scarOut(c.tx, c.ty, c.r * .5, SG); c.tx += ox; c.ty += oy; }
   }
   // onset: the voice "hits" a few petals outward
   if (recLike && lvl > avg + .12 && now - lastOnset > 150) {
@@ -492,9 +525,10 @@ function frame(now) {
     for (let j = 0; j < CORE.length; j++) {
       const o = CORE[j]; if (j === i) continue;
       const L0 = Math.hypot(c.tx - o.tx, c.ty - o.ty), dx = o.x - c.x, dy = o.y - c.y, d = Math.hypot(dx, dy) || 1;
-      if (d > L0 && !cutLink(c, o)) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
+      if (d > L0 && !cutLink(c, o) && !(SG.length && segHit(c, o, SG))) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
     }
-    if (fing) fingerForce(c, c.r, 1);
+    if (fing) fingerForce(c, c.r, fastK);
+    if (SG.length) { const [ox, oy] = scarOut(c.x, c.y, c.r * .5, SG); c.ax += ox * k * 3; c.ay += oy * k * 3; }
     { const dx = c.x - PX, dy = c.y - PY, d = Math.hypot(dx, dy) || 1, dm = (P.cutR + c.r) * cutS; if (d < dm) { c.ax += dx / d * (dm - d) * k * 2; c.ay += dy / d * (dm - d) * k * 2; } }
     if (hold) {
       const ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1;
@@ -631,13 +665,32 @@ function frame(now) {
     if (o.state === 'leave' && now - o.leaveT > P.leaveT * 1000) { if (textOrb === o) textOrb = null; ORBS.splice(i, 1); }
   }
 
+  if (fing && psp > P.orbCutSpeed && SCAR.length > 1) {
+    const a = SCAR[SCAR.length - 2], b = SCAR[SCAR.length - 1];
+    if (a.id === b.id) for (const o of ORBS) {
+      if (o.x === null || o.state !== 'ok') continue;
+      const ex = b.x - a.x, ey = b.y - a.y, L = ex * ex + ey * ey || 1, t = clamp(((o.x - a.x) * ex + (o.y - a.y) * ey) / L, 0, 1);
+      const qx = a.x + ex * t, qy = a.y + ey * t;
+      if (Math.hypot(o.x - qx, o.y - qy) > o.r * o.s + 6) continue;
+      const nl = Math.sqrt(L), nx = -ey / nl, ny = ex / nl, k2 = o.r * P.orbSplit * clamp(psp / P.fingerFast, .6, 2);
+      o.cvx = (o.cvx || 0) + nx * k2; o.cvy = (o.cvy || 0) + ny * k2;
+    }
+  }
+  for (const o of ORBS) {
+    o.cx2 = o.cx2 || 0; o.cy2 = o.cy2 || 0; o.cvx = o.cvx || 0; o.cvy = o.cvy || 0;
+    const hk = P.orbHeal, hc = 2 * Math.sqrt(hk);
+    o.cvx += (-o.cx2 * hk - o.cvx * hc) * dt; o.cvy += (-o.cy2 * hk - o.cvy * hc) * dt;
+    o.cx2 += o.cvx * dt; o.cy2 += o.cvy * dt;
+  }
+
   const M = HV.M, PN = HV.PN, GL = HV.GL, AU = HV.AU;
   M.fill(0); PN.fill(0); GL.fill(0); for (let i = 2; i < 16; i += 4) GL[i] = 1;
   let k = 0, gk = 0;
   for (const o of [...ORBS.filter(q => q.pinned), ...ORBS.filter(q => !q.pinned)]) {
     if (o.state === 'gone' || (o.state === 'merge' && o.s <= 0) || o.x === null || k >= 24) continue;
     const q = orbPos(o), rr = o.r * o.s * (1 - (o.bf || 0)), ef = clamp((q.y + o.r) / (P.edgeFade * H), 0, 1), w = (o.tw * vis * o.rs * o.dim + (o.pinned ? P.pinRim : 0)) * ef * ef * (3 - 2 * ef) * (1 - (o.bf || 0)), sh = 40 * (1 - vis);
-    M.set([q.x, q.y, rr, w], k * 8); M.set([o.qx, o.qy + sh, rr * .8, w], k * 8 + 4);
+    const sm = Math.min(1, Math.hypot(o.cx2, o.cy2) / Math.max(1, o.r)), ra = 1 - .25 * sm;
+    M.set([q.x + o.cx2, q.y + o.cy2, rr * ra, w], k * 8); M.set([o.qx - o.cx2 * (1 - .5 * (1 - sm)), o.qy + sh - o.cy2 * (1 - .5 * (1 - sm)), rr * (.8 + .2 * sm) * ra, w], k * 8 + 4);
     PN[k] = o.pinned ? P.pinInner : 0;
     if (o.pinned && gk < 4) { GL.set([q.x, q.y, P.auraScale * o.r, P.glowI * vis], gk * 4); gk++; }
     k++;

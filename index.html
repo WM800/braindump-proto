@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Podglad</title>
+<style>
+html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #111; }
+body { height: 100dvh; }
+iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 0; display: block; }
+#dev { position: fixed; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font: 18px sans-serif; opacity: .7; z-index: 20; touch-action: none; padding: 0; }
+#dev.hidden { display: none; }
+#hot { position: fixed; left: 0; top: 0; width: 56px; height: 56px; z-index: 30; }
+#panel { position: fixed; left: 0; right: 0; bottom: 0; max-height: 70dvh; overflow: auto; background: #1b1b1b; color: #eee; font: 14px/1.4 system-ui, sans-serif; padding: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); box-sizing: border-box; border-radius: 14px 14px 0 0; z-index: 25; display: none; }
+#panel.open { display: block; }
+#panel button { background: #333; color: #eee; border: 0; border-radius: 8px; padding: 8px 12px; margin: 2px; font: inherit; }
+#panel button.cur { background: #2d7ff9; }
+.row { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+#cur { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list { display: flex; flex-direction: column; gap: 4px; }
+.list button { text-align: left; width: 100%; }
+</style>
+</head>
+<body>
+<iframe id="frame" title="design"></iframe>
+<button id="dev" aria-label="Panel">&#9679;</button>
+<div id="hot"></div>
+<div id="panel">
+  <div class="row"><button id="prev">&#9664;</button><span id="cur"></span><button id="next">&#9654;</button></div>
+  <div class="row"><button id="toggleAll">Wszystkie</button><button id="fs">Pełny ekran</button><button id="hide">Ukryj przycisk</button><button id="close">Zamknij</button></div>
+  <div id="list" class="list"></div>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const frame = $('frame'), dev = $('dev'), panel = $('panel'), list = $('list'), cur = $('cur');
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  let names = [], all = false, name = null, last = '', poll = null;
+
+  const fromHash = () => { try { return decodeURIComponent(location.hash.slice(1)); } catch { return ''; } };
+  const pick = () => [fromHash(), store.get('proto.version'), names[0]].find(n => n && names.includes(n));
+  const get = () => fetch('versions.json?t=' + Date.now(), { cache: 'no-store' }).then(r => r.json());
+
+  function show(n, push, bust) {
+    name = n;
+    frame.src = 'v/' + encodeURIComponent(n) + (bust ? '?r=' + Date.now() : '');
+    store.set('proto.version', n);
+    if (push) history.replaceState(null, '', '#' + encodeURIComponent(n));
+    render();
+  }
+
+  function render() {
+    cur.textContent = name || '';
+    list.innerHTML = '';
+    for (const n of all ? names : names.slice(0, 3)) {
+      const b = document.createElement('button');
+      b.textContent = n;
+      if (n === name) b.className = 'cur';
+      b.onclick = () => show(n, true);
+      list.appendChild(b);
+    }
+    $('toggleAll').textContent = all ? 'Najnowsze 3' : 'Wszystkie';
+  }
+
+  function apply(data, bust) {
+    last = JSON.stringify(data);
+    names = data.map(v => v.file);
+    const keep = name && names.includes(name) ? name : pick();
+    if (!keep) return render();
+    if (keep !== name || bust) show(keep, true, bust);
+    else render();
+  }
+
+  async function refresh(bust) {
+    try { apply(await get(), bust); } catch {}
+  }
+
+  function startPoll() {
+    if (poll) return;
+    poll = setInterval(async () => {
+      try {
+        const data = await get();
+        if (JSON.stringify(data) !== last) apply(data, true);
+      } catch {}
+    }, 30000);
+  }
+
+  function step(d) {
+    if (!names.length) return;
+    const i = names.indexOf(name);
+    show(names[(i + d + names.length) % names.length], true);
+  }
+
+  function place(l, t) {
+    l = Math.max(0, Math.min(innerWidth - dev.offsetWidth, l));
+    t = Math.max(0, Math.min(innerHeight - dev.offsetHeight, t));
+    dev.style.left = l + 'px'; dev.style.top = t + 'px';
+    dev.style.right = 'auto'; dev.style.bottom = 'auto';
+  }
+
+  function togglePanel(open) { panel.classList.toggle('open', open ?? !panel.classList.contains('open')); }
+
+  let drag = null, moved = false;
+  dev.addEventListener('pointerdown', e => {
+    const r = dev.getBoundingClientRect();
+    drag = { x: e.clientX, y: e.clientY, l: r.left, t: r.top };
+    moved = false;
+    dev.setPointerCapture(e.pointerId);
+  });
+  dev.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!moved && Math.hypot(dx, dy) < 6) return;
+    moved = true;
+    place(drag.l + dx, drag.t + dy);
+  });
+  dev.addEventListener('pointerup', () => {
+    if (drag && moved) store.set('proto.pos', JSON.stringify({ l: dev.offsetLeft, t: dev.offsetTop }));
+    if (drag && !moved) togglePanel();
+    drag = null;
+  });
+  dev.addEventListener('pointercancel', () => { drag = null; });
+
+  let taps = [];
+  $('hot').addEventListener('pointerdown', () => {
+    const t = Date.now();
+    taps = taps.filter(x => t - x < 1000).concat(t);
+    if (taps.length >= 3) {
+      taps = [];
+      store.set('proto.hidden', '');
+      dev.classList.remove('hidden');
+    }
+  });
+
+  $('prev').onclick = () => step(-1);
+  $('next').onclick = () => step(1);
+  $('toggleAll').onclick = () => { all = !all; render(); };
+  $('close').onclick = () => togglePanel(false);
+  $('fs').onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    else document.documentElement.requestFullscreen?.().catch(() => {});
+  };
+  $('hide').onclick = () => {
+    store.set('proto.hidden', '1');
+    dev.classList.add('hidden');
+    togglePanel(false);
+  };
+  addEventListener('hashchange', () => {
+    const h = fromHash();
+    if (h && h !== name && names.includes(h)) show(h, false);
+  });
+
+  if (store.get('proto.hidden') === '1') dev.classList.add('hidden');
+  try {
+    const p = JSON.parse(store.get('proto.pos') || 'null');
+    if (p) place(p.l, p.t);
+  } catch {}
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+  refresh(false);
+  if ('EventSource' in window) {
+    const es = new EventSource('api/events');
+    es.addEventListener('reload', () => refresh(true));
+    es.onerror = () => { es.close(); startPoll(); };
+  } else startPoll();
+})();
+</script>
+</body>
+</html>

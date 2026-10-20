@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="icon" href="data:,">
+<title>Braindump — home-B · Immersion</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0B0C0F;color:#ECECF1;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.label{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#6E7180}
+.phone{position:relative;width:390px;height:844px;border-radius:44px;border:1px solid rgba(255,255,255,.08);overflow:hidden;background:#0B0C0F;touch-action:none;user-select:none;-webkit-user-select:none}
+@media (max-width:500px){body{gap:0}.label{display:none}.phone{width:100vw;height:100vh;height:100dvh;border-radius:0;border:0}}
+#cv{position:absolute;inset:0;width:100%;height:100%}
+.ui{position:absolute;inset:0;pointer-events:none}
+.ui>*{pointer-events:auto}
+.hint{position:absolute;left:0;right:0;bottom:36px;text-align:center;font-size:13px;color:#6E7180}
+.zoom{position:absolute;right:16px;bottom:110px;display:flex;flex-direction:column;gap:8px}
+.zoom button{width:40px;height:40px;border-radius:50%;border:1px solid rgba(199,201,209,.2);background:rgba(255,255,255,.04);color:#ECECF1;font-size:20px;line-height:1;cursor:pointer}
+.card{position:absolute;left:16px;right:72px;bottom:96px;padding:16px;border-radius:18px;background:rgba(20,21,27,.94);border:1px solid rgba(199,201,209,.12);opacity:0;transform:translateY(24px) scale(.96);transition:transform .35s cubic-bezier(.2,1.2,.3,1),opacity .25s;pointer-events:none}
+.card.on{opacity:1;transform:none;pointer-events:auto}
+.card p{font-size:15px;line-height:1.4}
+.cr{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:12px;color:#6E7180}
+.cr button{width:34px;height:34px;border-radius:50%;border:0;background:linear-gradient(135deg,#8B5CF6,#EC4899);color:#fff;font-size:11px;cursor:pointer;flex:none}
+.bar{flex:1;height:3px;background:rgba(199,201,209,.15);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,#8B5CF6,#EC4899)}
+</style>
+</head>
+<body>
+<div class="label">home-B · Immersion + Molecular structure</div>
+<div class="phone" id="phone">
+  <canvas id="cv"></canvas>
+  <div class="ui">
+    <div class="hint" id="hint">Hold to think · pinch to see your mind</div>
+    <div class="zoom"><button id="zp" aria-label="Zoom in">+</button><button id="zm" aria-label="Zoom out">−</button></div>
+    <div class="card" id="card">
+      <p id="ctext"></p>
+      <div class="cr"><button id="cplay" aria-label="Play">▶</button><span class="bar"><i id="cbar"></i></span><span id="ctime"></span></div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const frame = $('#phone'), cv = $('#cv'), ctx = cv.getContext('2d');
+const hint = $('#hint'), card = $('#card'), cbar = $('#cbar');
+const HINT = 'Hold to think · pinch to see your mind';
+const GREY = '199,201,209', VIO = '167,139,250', MUTED = '110,113,128';
+const TAU = Math.PI * 2, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const NOTES = [
+  {time:'09:12', text:'Call mom about the weekend trip', duration:'0:14'},
+  {time:'Yesterday 22:31', text:'Pitch: the app name should feel like light', duration:'0:22'},
+  {time:'Yesterday 18:05', text:'Dentist moved to the 28th, confirm it', duration:'0:08'},
+  {time:'Mon 14:20', text:'Garden layout: tomatoes on the south side', duration:'0:31'},
+  {time:'Sun 11:02', text:"Grandpa's story about the boat in '74", duration:'0:47'},
+  {time:'Sun 09:40', text:'Buy oat milk, check the lease renewal date', duration:'0:09'}
+];
+let W = 0, H = 0, DPR = 1, CX = 0, CY = 0;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 3);
+  W = frame.clientWidth; H = frame.clientHeight; CX = W / 2; CY = H / 2 - 60;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// world: core at origin, orbit at r110, map nodes at r600-1000
+let seed = 11;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const CLUS = [{n:'Tasks', a:-1.75}, {n:'Ideas', a:.35}, {n:'Memories', a:2.44}];
+const NODES = [], BONDS = [];
+CLUS.forEach((c, ci) => {
+  for (let j = 0; j < 10; j++) {
+    const an = c.a + (rnd() - .5) * .7, r = 600 + rnd() * 400;
+    NODES.push({x:Math.cos(an) * r, y:Math.sin(an) * r, cl:ci});
+  }
+});
+NODES.forEach((n, i) => {
+  NODES.map((m, j) => ({m, d:Math.hypot(m.x - n.x, m.y - n.y)}))
+    .filter(o => o.m !== n && o.d < 320)
+    .sort((p, q) => p.d - q.d).slice(0, 2)
+    .forEach(o => {
+      if (!BONDS.some(b => (b.a === n && b.b === o.m) || (b.a === o.m && b.b === n))) BONDS.push({a:n, b:o.m, g:1});
+    });
+});
+CLUS.forEach((c, ci) => {
+  const ns = NODES.filter(n => n.cl === ci);
+  c.x = ns.reduce((s, n) => s + n.x, 0) / ns.length;
+  c.y = ns.reduce((s, n) => s + n.y, 0) / ns.length;
+});
+
+const cam = {s:1, v:0, t:1};
+const ptrs = new Map();
+let pinch = null, rec = false, recId = null, lvl = 0, T = 0, last = 0;
+let lastTap = 0, lastTapP = null, cardIdx = -1;
+const FX = [], MAX = 400;
+
+const toS = (x, y) => ({x:CX + x * cam.s, y:CY + y * cam.s});
+const orbPos = i => { const a = i * TAU / 6 + T * TAU / 60; return {x:Math.cos(a) * 110, y:Math.sin(a) * 110}; };
+const pt = e => { const r = frame.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
+const inside = p => p.x >= 0 && p.y >= 0 && p.x <= W && p.y <= H;
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+function spawn(x, y, n) {
+  for (let i = 0; i < n; i++) FX.push({x:x + (Math.random() - .5) * 6, y:y + (Math.random() - .5) * 6,
+    vx:(Math.random() - .5) * 16, vy:-(12 + Math.random() * 30), age:0, life:900 + Math.random() * 600,
+    r:1 + Math.random() * 2, c:Math.random() < .5 ? GREY : VIO});
+  if (FX.length > MAX) FX.splice(0, FX.length - MAX);
+}
+function startRec(id) { rec = true; recId = id; hint.textContent = 'Listening…'; }
+function endRec(make) {
+  rec = false; hint.textContent = HINT;
+  if (!make) return;
+  const tgt = NODES[10 + Math.floor(Math.random() * 10)];
+  const L = Math.hypot(tgt.x, tgt.y), ux = tgt.x / L, uy = tgt.y / L;
+  const p2 = {x:tgt.x + ux * 90, y:tgt.y + uy * 90};
+  const L2 = Math.hypot(p2.x, p2.y);
+  const p1 = {x:p2.x / 2 - p2.y / L2 * 200, y:p2.y / 2 + p2.x / L2 * 200};
+  NODES.push({x:0, y:0, cl:1, fly:{t0:performance.now(), p1, p2, tgt}});
+  const prev = cam.t;
+  cam.t = .6;
+  setTimeout(() => { if (!rec) cam.t = prev; }, 1500);
+}
+function openCard(i) {
+  cardIdx = i;
+  $('#ctext').textContent = NOTES[i].text;
+  $('#ctime').textContent = NOTES[i].time + ' · ' + NOTES[i].duration;
+  cbar.style.transition = 'none'; cbar.style.width = '0';
+  card.classList.add('on');
+}
+function closeCard() { card.classList.remove('on'); }
+$('#cplay').onclick = () => {
+  const [m, s] = NOTES[cardIdx].duration.split(':').map(Number);
+  cbar.style.transition = 'none'; cbar.style.width = '0';
+  void cbar.offsetWidth;
+  cbar.style.transition = `width ${m * 60 + s}s linear`; cbar.style.width = '100%';
+};
+$('#zp').onclick = () => { cam.t = clamp(cam.t * 1.25, .25, 2); };
+$('#zm').onclick = () => { cam.t = clamp(cam.t / 1.25, .25, 2); };
+
+frame.addEventListener('pointerdown', e => {
+  if (e.target.closest('.ui')) return;
+  const p = pt(e);
+  ptrs.set(e.pointerId, p);
+  spawn(p.x, p.y, 3 + (Math.random() * 4 | 0));
+  if (ptrs.size === 2) {
+    if (rec) endRec(false);
+    const [a, b] = [...ptrs.values()];
+    pinch = {d0:dist(a, b), s0:cam.t};
+    return;
+  }
+  if (ptrs.size > 1) return;
+  if (Math.hypot(p.x - CX, p.y - CY) < 60 * cam.s + 8) { startRec(e.pointerId); closeCard(); return; }
+  for (let i = 0; i < 6; i++) {
+    const o = toS(orbPos(i).x, orbPos(i).y);
+    if (Math.hypot(p.x - o.x, p.y - o.y) < 16) { openCard(i); return; }
+  }
+  closeCard();
+  const now = performance.now();
+  if (lastTap && now - lastTap < 320 && dist(p, lastTapP) < 30) { cam.t = cam.t > .5 ? .25 : 1; lastTap = 0; }
+  else { lastTap = now; lastTapP = p; }
+});
+window.addEventListener('pointermove', e => {
+  const p = pt(e);
+  if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, p);
+  if (inside(p)) spawn(p.x, p.y, 3 + (Math.random() * 4 | 0));
+  if (pinch && ptrs.size === 2) {
+    const [a, b] = [...ptrs.values()];
+    cam.t = clamp(pinch.s0 * dist(a, b) / pinch.d0, .25, 2);
+  }
+});
+function up(e) {
+  ptrs.delete(e.pointerId);
+  if (rec && e.pointerId === recId) endRec(true);
+  if (ptrs.size < 2) pinch = null;
+}
+window.addEventListener('pointerup', up);
+window.addEventListener('pointercancel', up);
+frame.addEventListener('wheel', e => {
+  e.preventDefault();
+  cam.t = clamp(cam.t * Math.exp(-e.deltaY * .0015), .25, 2);
+}, {passive:false});
+
+function dot(x, y, r, c, a) {
+  ctx.fillStyle = `rgba(${c},${a})`; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+}
+function frameLoop() {
+  const now = performance.now();
+  const dt = Math.min((now - (last || now)) / 1000, 1 / 30);
+  last = now; T += dt;
+
+  const acc = (cam.t - cam.s) * 120 - cam.v * 18;
+  cam.v += acc * dt; cam.s = clamp(cam.s + cam.v * dt, .1, 2.5);
+
+  const vt = rec ? clamp(.5 + .5 * (.55 * Math.sin(T * 1.7) + .3 * Math.sin(T * 3.9 + 1.3) + .15 * Math.sin(T * 7.3) + (Math.random() * 2 - 1) * .3), 0, 1) : 0;
+  lvl += (vt - lvl) * Math.min(1, dt * 6);
+
+  for (const n of NODES) {
+    if (!n.fly) continue;
+    const u = (now - n.fly.t0) / 1200;
+    if (u >= 1) {
+      n.x = n.fly.p2.x; n.y = n.fly.p2.y;
+      BONDS.push({a:n, b:n.fly.tgt, g:0});
+      n.fly = null;
+    } else {
+      const e = u * u * (3 - 2 * u), q = n.fly;
+      n.x = 2 * (1 - e) * e * q.p1.x + e * e * q.p2.x;
+      n.y = 2 * (1 - e) * e * q.p1.y + e * e * q.p2.y;
+    }
+  }
+  for (const b of BONDS) if (b.g < 1) b.g = Math.min(1, b.g + dt * 2.2);
+
+  for (let i = FX.length - 1; i >= 0; i--) {
+    const p = FX[i];
+    p.age += dt * 1000;
+    if (p.age >= p.life) { FX.splice(i, 1); continue; }
+    p.vx += (Math.random() - .5) * 30 * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+
+  ctx.clearRect(0, 0, W, H);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = `rgba(${GREY},.18)`;
+  for (const b of BONDS) {
+    const A = toS(b.a.x, b.a.y), B = toS(b.b.x, b.b.y);
+    ctx.beginPath(); ctx.moveTo(A.x, A.y);
+    ctx.lineTo(A.x + (B.x - A.x) * b.g, A.y + (B.y - A.y) * b.g); ctx.stroke();
+  }
+  for (const n of NODES) { const p = toS(n.x, n.y); dot(p.x, p.y, 4, GREY, 1); }
+
+  const la = clamp((.6 - cam.s) / .25, 0, 1);
+  if (la > 0) {
+    ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(${MUTED},${la})`;
+    for (const c of CLUS) { const p = toS(c.x, c.y); ctx.fillText(c.n, p.x, p.y - 14); }
+  }
+
+  const R = 60 * cam.s * (rec ? 1 + .14 * lvl : 1 + .01 * Math.sin(T * 1.2));
+  const g = ctx.createLinearGradient(CX - R, CY - R, CX + R, CY + R);
+  g.addColorStop(0, '#8B5CF6'); g.addColorStop(1, '#EC4899');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(CX, CY, R, 0, TAU); ctx.fill();
+
+  const amp = rec ? 3 + 9 * lvl : 1.5;
+  for (let i = 0; i < 12; i++) {
+    const a = i * TAU / 12 + T * .15;
+    const rr = (85 + Math.sin(T * 9 + i * 1.7) * amp) * cam.s;
+    dot(CX + Math.cos(a) * rr, CY + Math.sin(a) * rr, 2.5, GREY, .8);
+  }
+  for (let i = 0; i < 6; i++) { const p = toS(orbPos(i).x, orbPos(i).y); dot(p.x, p.y, 7, GREY, 1); }
+
+  for (let i = 0; i < FX.length; i++) {
+    const p = FX[i];
+    let best = 40, bj = -1;
+    for (let j = 0; j < FX.length; j++) {
+      if (j === i) continue;
+      const d = Math.hypot(FX[j].x - p.x, FX[j].y - p.y);
+      if (d < best) { best = d; bj = j; }
+    }
+    if (bj >= 0) {
+      ctx.strokeStyle = `rgba(${VIO},${(1 - p.age / p.life) * (1 - best / 40) * .5})`;
+      ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(FX[bj].x, FX[bj].y); ctx.stroke();
+    }
+  }
+  for (const p of FX) dot(p.x, p.y, p.r, p.c, 1 - p.age / p.life);
+  requestAnimationFrame(frameLoop);
+}
+requestAnimationFrame(frameLoop);
+</script>
+</body>
+</html>

@@ -46,13 +46,13 @@ const TEXTS = ['Call mom back', 'Light as a material', 'Oat milk run', 'Garden: 
 const P0 = {
   // core body: irregular parts (3 big, 7 small), one cohesive whole
   coreY:.8, coreScale:1, partDrift:.08, idleSpin:60,
-  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.42, recShrink:.25, petalMax:.92, leashK:260, onsetKick:170, agcFloor:.4, agcPeak:.35, puffK:50, bandPush:12, toneStretch:.2, shiver:7, centerK:40, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.2, onsetMin:.18, voiceWave:1.5, voiceWaveGap:450, toneSwirl:400, maxStretch:1.8, followMax:8, grabPull:16,
+  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.42, recShrink:.25, petalMax:.92, leashK:260, onsetKick:110, agcFloor:.4, agcPeak:.35, puffK:35, bandPush:12, toneStretch:.2, shiver:7, centerK:40, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.2, onsetMin:.18, voiceWave:1.5, voiceWaveGap:450, toneSwirl:400, maxStretch:1.8, followMax:8, grabPull:30, grabLoose:.4,
   // field: 1 = original soft merge, higher = crisper pinch-off between parts
   sharp:1, smallLight:.5,
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:1.5, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:1.2, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:3, fragHealK:1.6, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
@@ -60,9 +60,9 @@ const P0 = {
   // thoughts: slow upward stream, critically damped (no bounce)
   topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.08, homeRate:.15, homeGap:95, homePull:.02, gapBreath:.2, wander:1.8, stagger:.6, repel:5, cohesion:.15, tailK:40, tailC:8, arriveT:5, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
   // pin: stays where dropped, slow soft aura + wave
-  pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9, healZeta:.5, healZetaMany:.3, birthPull:5};
+  pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v27')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v28')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -78,7 +78,7 @@ void main(){
     float sr=b.z*b.z*.25;GS+=-2.*b.z*b.z*dv/((d2+sr)*(d2+sr));fA+=q*mA;fB+=q*mB;xA+=g.x*mA;yA+=g.y*mA;xB+=g.x*mB;yB+=g.y*mB;lw+=q*(b.w-2.*gi);}
   // cut pieces: each group is its own body; groups join by a smooth union (p-norm), blended in by uSep
   {vec4 o=vec4(1.);f=dot(fA,o)+dot(fB,o);G=vec2(dot(xA,o)+dot(xB,o),dot(yA,o)+dot(yB,o));
-   if(abs(uSep)>1e-4){float pe=max(.55,1.+5.*uSep);vec4 sA=max(fA,vec4(1e-5)),sB=max(fB,vec4(1e-5));vec4 a5=pow(sA,vec4(pe-1.)),b5=pow(sB,vec4(pe-1.));
+   if(uSep>0.){float pe=1.+5.*uSep;vec4 sA=max(fA,vec4(1e-5)),sB=max(fB,vec4(1e-5));vec4 a5=pow(sA,vec4(pe-1.)),b5=pow(sB,vec4(pe-1.));
      float S=dot(a5*fA,o)+dot(b5*fB,o);float fs=pow(max(S,1e-9),1./pe);float fs5=max(pow(fs,pe-1.),1e-6);
      f=fs;G=vec2(dot(a5,xA)+dot(b5,xB),dot(a5,yA)+dot(b5,yB))/fs5;}}
   float lwn=f>0.?lw/f:1.;
@@ -260,7 +260,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v27', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v28', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {
@@ -438,13 +438,9 @@ function fracture(now, dt, dts, vol, fing) {
   }
   // separation amount: on while cutting, heals smoothly after cutHold
   const cutting = now - lastCut < P.cutHold * 1000;
-  // heal = an underdamped spring on the separation: the pieces melt together and the joined body overshoots a little
-  // (union softer than a plain sum = a short swell) and settles; the more pieces, the springier
+  // heal along a smootherstep curve: starts and lands with zero speed, so the joining never stops with a jolt
   if (cutting) { sepAmt += (1 - sepAmt) * Math.min(1, dt * 12); sepV = 0; }
-  else if (sepAmt !== 0 || sepV !== 0) {
-    const w0 = 4.2 / Math.max(.2, P.cutHeal), z = P.healZeta + (P.healZetaMany - P.healZeta) * clamp((nGroups - 2) / 4, 0, 1);
-    sepV += (-sepAmt * w0 * w0 - 2 * z * w0 * sepV) * dt; sepAmt += sepV * dt;
-  }
+  else { const hl = clamp(1 - (now - lastCut - P.cutHold * 1000) / (Math.max(.1, P.cutHeal) * 1000), 0, 1); sepAmt = Math.min(sepAmt, hl * hl * hl * (hl * (hl * 6 - 15) + 10)); }
   if (!cutting && Math.abs(sepAmt) < .004 && Math.abs(sepV) < .02) { sepAmt = 0; sepV = 0; STK.length = 0; nGroups = 1; }
   // groups: fragments are bonded when close and no stroke lies between them
   const n = FR.length;
@@ -462,7 +458,7 @@ function fracture(now, dt, dts, vol, fing) {
     nGroups = Math.max(nGroups, ng);
   } else if (!STK.length) for (let i = 0; i < n; i++) FR[i].g = 0;
   // fragment motion: loose fluid while cut, pulled home (critically damped) while healing
-  kFs += (P.fragK * (cutting ? P.fragLoose : 1) - kFs) * Math.min(1, dt * (cutting ? 8 : 1.5));
+  kFs += (P.fragK * (cutting ? P.fragLoose : P.fragHealK) - kFs) * Math.min(1, dt * (cutting ? 8 : 3));
   const kF = kFs, cF = 2 * Math.sqrt(kF), gap = P.cutGap * sepAmt;
   const decay = cutting ? 1 : Math.exp(-dt * P.healRate);
   for (let i = 0; i < n; i++) {
@@ -680,7 +676,7 @@ function frame(now) {
     if (c.band < 0) continue; const ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1;
     c.vx += -uy / ud * toneV * P.toneSwirl * dt; c.vy += ux / ud * toneV * P.toneSwirl * dt;
   }
-  const kS = P.kShape * (recLike ? P.recLoose : 1);
+  const kS = P.kShape * (recLike ? P.recLoose : 1) * (hold ? .5 : 1);
   const pdl = Math.hypot(PX - cx, PY - cy) || 1;
   for (let i = 0; i < CORE.length; i++) {
     const c = CORE[i], k = kS * c.km, cS = 2 * Math.sqrt(k) * P.dampR;
@@ -689,7 +685,7 @@ function frame(now) {
     for (let j = 0; j < CORE.length; j++) {
       const o = CORE[j]; if (j === i) continue;
       const L0 = Math.hypot(c.tx - o.tx, c.ty - o.ty), dx = o.x - c.x, dy = o.y - c.y, d = Math.hypot(dx, dy) || 1;
-      if (d > L0) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
+      if (d > L0) { const f = P.kLink * (hold ? P.grabLoose : 1) * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
     }
     if (fing) fingerForce(c, c.r, fastK);
     { const dx = c.x - PX, dy = c.y - PY, d = Math.hypot(dx, dy) || 1, dm = (P.cutR + c.r) * cutS; if (d < dm) { c.ax += dx / d * (dm - d) * k * 2; c.ay += dy / d * (dm - d) * k * 2; } }
@@ -709,7 +705,7 @@ function frame(now) {
     if (ov > 0) { const vr = (c.vx * ux + c.vy * uy) / ud; c.ax -= ux / ud * (ov * P.leashK + Math.max(0, vr) * 2 * Math.sqrt(P.leashK)); c.ay -= uy / ud * (ov * P.leashK + Math.max(0, vr) * 2 * Math.sqrt(P.leashK)); } }
   // keep the body centred: the mass centre is pulled (critically damped) to the anchor, voice can only reshape it
   { let mx = 0, my = 0, mvx = 0, mvy = 0, ms = 0; for (const c of CORE) { const w = c.r * c.r; mx += c.x * w; my += c.y * w; mvx += c.vx * w; mvy += c.vy * w; ms += w; }
-    mx /= ms; my /= ms; mvx /= ms; mvy /= ms; const kc = P.centerK, cc = 2 * Math.sqrt(kc);
+    mx /= ms; my /= ms; mvx /= ms; mvy /= ms; const kc = P.centerK * (hold ? .3 : 1), cc = 2 * Math.sqrt(kc);
     const ex = (cx - mx) * kc - mvx * cc, ey = (cy - my) * kc - mvy * cc; for (const c of CORE) { c.ax += ex; c.ay += ey; } }
   for (const c of CORE) {
     c.vx += c.ax * dt; c.vy += c.ay * dt; c.x += c.vx * dt; c.y += c.vy * dt;

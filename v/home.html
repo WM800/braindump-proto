@@ -85,13 +85,20 @@ void main(){
   float rim=edge*edge*uRim*(.6+1.2*side*side)*lwn;
   float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn;
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
-  float f2=0.,w2=0.,pw=0.;
-  for(int i=0;i<48;i++){vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float c2=b.z*b.z/max(dot(dv,dv),1.);f2+=c2;w2+=c2*b.w;pw+=c2*uPin[i/2]*float(i-2*(i/2));}
+  float f2=0.,w2=0.,pw=0.;vec2 G2=vec2(0.);
+  for(int i=0;i<48;i++){vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
   float bw=f2>0.?w2/f2:0.;
   float m2=smoothstep(.98,1.02,f2);
   float e2=1.-smoothstep(1.,1.8,f2);
-  c=mix(c,.0118+bw*e2*e2,m2);
-  c+=m2*(f2>0.?pw/f2:0.)*sqrt(max(0.,1.-1./max(f2,1.)));
+  // orbs lit by the same lamp as the core: rim on the lit side + highlight; pinned = filled lit sphere, no dark band
+  float gn2=max(length(G2),1e-4);
+  vec3 N2=normalize(vec3(-G2/gn2*e2*.9,1.));
+  float side2=max(dot(N2.xy,uLD),0.);
+  float pk=f2>0.?pw/f2:0.;
+  float body=.0118+pk*(.55+.45*sqrt(max(0.,1.-1./max(f2,1.))));
+  float rim2=(bw+pk*.5)*e2*e2*(.4+1.6*side2*side2);
+  float sp2=pow(max(dot(N2,Hv),0.),40.)*e2*(bw*3.+pk*1.5);
+  c=mix(c,body+rim2+sp2,m2);
   for(int i=0;i<4;i++){vec4 g=uGlow[i];if(g.w<=0.)continue;float d=length(p-g.xy);c+=g.w*(exp(-d/g.z)+.12*exp(-d/(5.*g.z)));}
   if(uAura.w>0.){float d=length(p-uAura.xy);c+=uAura.w*(exp(-d/uAura.z)+.12*exp(-d/(5.*uAura.z)));}
   gl_FragColor=vec4(vec3(c),1.);

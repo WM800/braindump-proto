@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<link rel="icon" href="data:,">
+<title>Braindump — home8 · Drop + thoughts</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#000;color:#8A8A8A;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+.phone{position:relative;width:390px;height:844px;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+@media (max-width:500px){.phone{width:100vw;height:100vh;height:100dvh}}
+canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-action:none}
+#msg{position:absolute;left:0;right:0;top:60%;text-align:center;font-size:13px;letter-spacing:.02em;color:#8A8A8A;opacity:0;transition:opacity .4s;pointer-events:none}
+#msg.on{opacity:1}
+#mic{position:absolute;left:0;right:0;bottom:24px;text-align:center;font-size:11px;color:#444;display:none;pointer-events:none}
+#hint{position:absolute;left:0;right:0;top:48px;text-align:center;font-size:11px;color:#333;opacity:0;transition:opacity 1s;pointer-events:none}
+#hint.on{opacity:1}
+#note{position:absolute;left:0;top:0;max-width:200px;font:13px/1.35 system-ui,"Segoe UI",sans-serif;letter-spacing:.01em;text-align:center;color:rgba(255,255,255,.66);text-shadow:0 0 14px #000;pointer-events:none}
+#note i{display:block;font-style:normal;opacity:0;transform:translateY(6px);transition:opacity .22s,transform .22s}
+#note.on i{opacity:1;transform:none}
+#dev{position:fixed;right:12px;top:12px;width:250px;max-height:90vh;overflow:auto;padding:12px;background:rgba(18,18,18,.82);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-radius:14px;font-size:11px;color:#bbb;z-index:9;display:none}
+#dev.on{display:block}
+@media (max-width:500px){#dev{left:0;right:0;top:auto;bottom:0;width:auto;max-height:50vh;border-radius:14px 14px 0 0}}
+#dev label{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:6px}
+#dev input{grid-column:1/3;width:100%}
+#dev button{font:11px system-ui,"Segoe UI",sans-serif;color:#ddd;background:#2a2a2a;border:0;border-radius:8px;padding:6px 8px;margin:4px 4px 0 0}
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+  <canvas id="gl"></canvas>
+  <div id="hint">double-tap to hide thoughts</div>
+  <div id="msg"></div>
+  <div id="mic">mic off</div>
+  <div id="note"><i></i></div>
+</div>
+<div id="dev"></div>
+<script>
+const $ = s => document.querySelector(s);
+const TAU = Math.PI * 2, PH = $('#phone'), MSG = $('#msg'), MIC = $('#mic'), HINT = $('#hint'), NOTE = $('#note'), LBL = NOTE.firstChild, DEV = $('#dev');
+const TEXTS = ['Call mom back', 'Light as a material', 'Oat milk run', 'Garden: tomatoes south', 'Dentist, the 28th', 'Lease renewal Friday', "Grandpa's boat story", 'Sketch the drop'];
+const NEW = ['Idea: sound as water', 'Check tire pressure', 'Reply to Ola', 'Plan the weekend trip', 'Book the vet', 'Name for the app'];
+const P0 = {lightLag:.10, lobeMax:.38, rippleAmp:.12, splashTh:.6, splashRate:14, splashSpeed:110, maxDrops:12, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, splashRmin:3, splashRmax:7, splashSpread:40, pokeR:1.7, pokeMax:.25, tearSpeed:1100, tearCool:.15, pinHold:500, pinRim:.08, pinInner:.03, arriveT:1.4, leaveT:4, maxThoughts:8, labelGap:22};
+const P = Object.assign({}, P0);
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v8')) || {}); } catch (e) {}
+const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
+// FROM core6 (lines 30-47), verbatim
+const FS = `precision highp float;
+uniform vec2 uRes;uniform float uDpr,uRim,uGR;uniform vec2 uLD;uniform vec4 uB[40];
+uniform vec4 uM[20];uniform float uPin[10];
+void main(){
+  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
+  float f=0.;vec2 G=vec2(0.);
+  for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float r2=b.z*b.z;f+=r2/d2;G-=2.*r2*dv/(d2*d2);}
+  float gn=max(length(G),1e-4);
+  float sd=(f-1.)/gn;
+  float m=smoothstep(-.7,.7,sd);
+  float og=exp(-max(-sd,0.)/uGR);
+  float edge=1.-smoothstep(1.,1.8,f);
+  vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
+  vec3 Lv=normalize(vec3(uLD*.6,.8)),Hv=normalize(Lv+vec3(0.,0.,1.));
+  float side=max(dot(N.xy,uLD),0.);
+  float rim=edge*edge*uRim*(.6+1.2*side*side);
+  float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge;
+  float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08;
+  // FROM thoughts6 (lines 48-53), plus pin term (pw) and 20-disk bound
+  float f2=0.,w2=0.,pw=0.;
+  for(int i=0;i<20;i++){vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float c2=b.z*b.z/max(dot(dv,dv),1.);f2+=c2;w2+=c2*b.w;pw+=c2*uPin[i/2]*float(i-2*(i/2));}
+  float bw=f2>0.?w2/f2:0.;
+  bw+=f2>0.?pw/f2:0.;
+  float m2=smoothstep(.98,1.02,f2);
+  float e2=1.-smoothstep(1.,1.8,f2);
+  c=mix(c,.0118+bw*e2*e2,m2);
+  gl_FragColor=vec4(vec3(c),1.);
+}`;
+
+let W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
+let lvl = 0, avg = 0, rimS = .45, grS = 18, rv = 0, spAcc = 0, tearCd = 0, shoutEnd = -1e9;
+let rec = false, recId = null, recT0 = 0, shown = -1, drop = null, lastOnset = -1e9;
+let micState = 'idle', an = null, ctxA = null, tbuf = null, freq = null;
+const sc = {x:1, v:0, t:1};
+const BS = [0, 0, 0, 0, 0, 0];
+const RIP = [], DR = [];
+const QX = {p:0, v:0}, QY = {p:0, v:0};
+const PKX = Array.from({length:13}, () => ({p:0, v:0})), PKY = Array.from({length:13}, () => ({p:0, v:0}));
+let PX = 0, PY = 0, lPX = 0, lPY = 0, lastIn = -1e9, LD = [1, 0], CX = 0, CY = 0, RR = 72, psp = 0;
+let drag = null, pts = new Map(), lastEmpty = -1e9, hidden = false, visFrom = 1, visTo = 1, visStart = -1e9, vis = 1;
+let textOrb = null, textShowT = -1e9, dropPulseT = -1e9, corner = [], nextIdx = 0, SEQ = 0;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rnd = (() => { let s = 11; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
+
+function mkOrb(text) {
+  return {id:SEQ++, text, rn:.5 + .5 * rnd(), P:18 + 12 * rnd(), ph:rnd() * TAU, r:6 + 8 * rnd(), s:1, x:null, y:null, vx:0, vy:0,
+    tw:.07, ox:0, oy:0, rank:0, rs:1, dim:1, hx:0, hy:0, state:'ok', pinned:false, px:0, py:0, grab:false, tx:undefined,
+    pulseT:-1e9, mx:0, my:0, mT:0, goneT:0, sx:0, sy:0, arriveT:0, leaveT:0, lx:0, ly:0};
+}
+const ORBS = TEXTS.map(t => mkOrb(t));
+
+function makeView() {
+  const cv = document.getElementById('gl'), g = cv.getContext('webgl', {alpha:false, antialias:false});
+  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(80), PN:new Float32Array(10)};
+  if (!g) return v;
+  const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); return o; };
+  const pr = g.createProgram();
+  g.attachShader(pr, sh(g.VERTEX_SHADER, VS)); g.attachShader(pr, sh(g.FRAGMENT_SHADER, FS));
+  g.linkProgram(pr); g.useProgram(pr);
+  g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
+  g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+  const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uM','uPin'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  return v;
+}
+const HV = makeView();
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2); W = PH.clientWidth; H = PH.clientHeight;
+  HV.cv.width = Math.round(W * DPR); HV.cv.height = Math.round(H * DPR);
+  HV.cv.style.width = W + 'px'; HV.cv.style.height = H + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// FROM core6: microphone
+function startMic() {
+  if (micState !== 'idle') return;
+  micState = 'pending';
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micState = 'off'; MIC.style.display = 'block'; return; }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(st => {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctxA = new AC();
+    an = ctxA.createAnalyser(); an.fftSize = 512; an.smoothingTimeConstant = .8;
+    ctxA.createMediaStreamSource(st).connect(an);
+    tbuf = new Float32Array(an.fftSize); freq = new Uint8Array(an.frequencyBinCount);
+    micState = 'on';
+  }).catch(() => { micState = 'off'; MIC.style.display = 'block'; });
+}
+function micLevels() {
+  an.getFloatTimeDomainData(tbuf);
+  let s = 0; for (let i = 0; i < tbuf.length; i++) s += tbuf[i] * tbuf[i];
+  const rms = Math.sqrt(s / tbuf.length), gate = rms < .02;
+  const L = gate ? 0 : Math.sqrt(Math.min(1, rms / .3));
+  an.getByteFrequencyData(freq);
+  const hz = ctxA.sampleRate / an.fftSize, out = [];
+  for (let k = 0; k < 6; k++) {
+    const i0 = Math.max(1, Math.floor(80 * Math.pow(50, k / 6) / hz)), i1 = Math.max(i0, Math.min(freq.length - 1, Math.ceil(80 * Math.pow(50, (k + 1) / 6) / hz)));
+    let sum = 0; for (let i = i0; i <= i1; i++) sum += freq[i];
+    out.push(gate ? 0 : Math.min(1, Math.sqrt(sum / (i1 - i0 + 1) / 255) * 1.4));
+  }
+  return {lvl:L, bands:out};
+}
+
+// FROM core6: recording
+function startRec() {
+  rec = true; recT0 = performance.now(); shown = -1; sc.t = 1.15; drop = null;
+  MSG.classList.add('on');
+  startMic();
+}
+function stopRec() {
+  rec = false; sc.t = 1; drop = {t0:performance.now()};
+  MSG.classList.remove('on');
+}
+function spring(s, dt) {
+  const a = (s.t - s.x) * 70 - s.v * 12.5;
+  s.v += a * dt; s.x += s.v * dt;
+}
+function springXY(s, tg, k, c, dt) { const a = (tg - s.p) * k - s.v * c; s.v += a * dt; s.p += s.v * dt; }
+
+// FROM thoughts6: visibility
+const ease = p => p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+function toggle(now) {
+  const cur = visNow(now);
+  hidden = !hidden; visFrom = cur; visTo = hidden ? 0 : 1; visStart = now;
+  if (hidden) textShowT = -1e9;
+}
+function visNow(now) { return visFrom + (visTo - visFrom) * ease(clamp((now - visStart) / 900, 0, 1)); }
+const pt = e => { const r = PH.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
+function orbPos(o) { return {x:o.x, y:o.y + 40 * (1 - vis)}; }
+
+function addThought(now) {
+  const o = mkOrb(NEW[nextIdx++ % NEW.length]);
+  o.state = 'arrive'; o.arriveT = now; o.sx = CX; o.sy = CY - RR * .95; o.x = o.sx; o.y = o.sy; o.s = .6;
+  ORBS.unshift(o);
+  const free = ORBS.filter(q => !q.pinned && q.state !== 'leave' && q.state !== 'gone' && q.state !== 'merge');
+  if (free.length > P.maxThoughts) { const old = free[free.length - 1]; old.state = 'leave'; old.leaveT = now; old.lx = old.x; old.ly = old.y; }
+}
+function togglePin(o, now) { o.pinned = !o.pinned; if (o.pinned) { o.px = o.x; o.py = o.y; } o.pulseT = now; }
+
+function spawnDrop(posAng, velAng, spd, cx, cy, R) {
+  if (DR.length >= P.maxDrops) return;
+  const x = cx + Math.cos(posAng) * R * .9, y = cy + Math.sin(posAng) * R * .9;
+  DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r:P.splashRmin + (P.splashRmax - P.splashRmin) * Math.random(), age:0});
+}
+
+let devBuilt = false;
+function save() { try { localStorage.setItem('bd_tune_v8', JSON.stringify(P)); } catch (e) {} }
+function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
+function buildDev() {
+  DEV.innerHTML = '';
+  for (const [k, mn, mx, st] of META) {
+    const l = document.createElement('label'), s = document.createElement('span'), v = document.createElement('span'), r = document.createElement('input');
+    s.textContent = k; v.textContent = P[k];
+    r.type = 'range'; r.min = mn; r.max = mx; r.step = st; r.value = P[k];
+    r.addEventListener('input', () => { P[k] = +r.value; v.textContent = P[k]; save(); });
+    l.append(s, v, r); DEV.append(l);
+  }
+  const b = (name, fn) => { const x = document.createElement('button'); x.textContent = name; x.onclick = fn; DEV.append(x); };
+  b('Copy JSON', () => { try { navigator.clipboard.writeText(JSON.stringify(P)); } catch (e) {} });
+  b('Reset', () => { Object.assign(P, P0); save(); buildDev(); });
+  b('Add thought', () => addThought(performance.now()));
+  b('Shout test', () => { shoutEnd = performance.now() + 1200; });
+}
+const META = [['lightLag',.02,.5,.01],['lobeMax',.1,.6,.01],['rippleAmp',0,.3,.01],['splashTh',.2,.95,.01],['splashRate',0,40,1],['splashSpeed',20,300,5],['maxDrops',0,12,1],['dropReturn',5,120,1],['splashDelay',0,1,.05],['splashFric',0,8,.1],['mergeR',.2,1,.05],['splashRmin',1,8,.5],['splashRmax',2,12,.5],['splashSpread',0,80,1],['pokeR',1,2.5,.05],['pokeMax',0,.5,.01],['tearSpeed',300,3000,50],['tearCool',0,1,.01],['pinHold',200,1000,10],['pinRim',0,.3,.01],['pinInner',0,.1,.005],['arriveT',.4,3,.05],['leaveT',1,8,.1],['maxThoughts',4,8,1],['labelGap',0,60,1]];
+DEV.addEventListener('pointerdown', e => e.stopPropagation());
+DEV.addEventListener('pointermove', e => e.stopPropagation());
+DEV.addEventListener('pointerup', e => e.stopPropagation());
+
+PH.addEventListener('pointerdown', e => {
+  const p = pt(e), now = performance.now();
+  if (p.x > W - 56 && p.y < 56) { corner = corner.filter(t => now - t < 900); corner.push(now); if (corner.length >= 3) { corner = []; toggleDev(); } return; }
+  pts.set(e.pointerId, p);
+  if (pts.size === 2) { if (drag) { drag.o.grab = false; clearTimeout(drag.lp); drag = null; } toggle(now); return; }
+  if (vis > .5 && !hidden) {
+    for (const o of ORBS) {
+      if (o.state !== 'ok') continue;
+      const q = orbPos(o);
+      if (Math.hypot(p.x - q.x, p.y - q.y) < o.r * o.s + 14) {
+        o.grab = true; drag = {id:e.pointerId, o, x0:p.x, y0:p.y, t0:now, moved:0, lp:0, long:false};
+        drag.lp = setTimeout(() => { if (drag && drag.o === o && drag.moved < 8) { drag.long = true; togglePin(o, performance.now()); } }, P.pinHold);
+        textOrb = o; return;
+      }
+    }
+  }
+  if (!rec && Math.hypot(p.x - W / 2, p.y - H * .8) < 90) { startRec(); recId = e.pointerId; return; }
+  if (now - lastEmpty < 300) { lastEmpty = -1e9; toggle(now); return; }
+  lastEmpty = now;
+});
+window.addEventListener('pointermove', e => {
+  if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
+  const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
+  if (!drag || e.pointerId !== drag.id) return;
+  drag.moved = Math.max(drag.moved, Math.hypot(p.x - drag.x0, p.y - drag.y0));
+  drag.o.tx = p.x; drag.o.ty = p.y;
+});
+function end(e) {
+  if (rec && e.pointerId === recId) stopRec();
+  pts.delete(e.pointerId);
+  if (!drag || e.pointerId !== drag.id) return;
+  const o = drag.o, now = performance.now(), c = {x:W / 2, y:H * .8};
+  o.grab = false; clearTimeout(drag.lp);
+  if (drag.long) { if (o.pinned) { o.px = o.x; o.py = o.y; } }
+  else if (now - drag.t0 < 200 && drag.moved < 10) { o.pulseT = now; textShowT = now; textOrb = o; }
+  else if (Math.hypot(o.x - c.x, o.y - c.y) < 60) { o.state = 'merge'; o.pinned = false; o.mT = now; o.mx = o.x; o.my = o.y; textShowT = -1e9; }
+  else { if (o.pinned && drag.moved >= 8) { o.px = o.x; o.py = o.y; } textShowT = -1e9; }
+  drag = null;
+}
+window.addEventListener('pointerup', end);
+window.addEventListener('pointercancel', end);
+window.addEventListener('keydown', e => {
+  const k = e.key.toLowerCase(), now = performance.now();
+  if (k === 't') toggle(now); else if (k === 'd') toggleDev(); else if (k === 'n') addThought(now);
+});
+setTimeout(() => HINT.classList.add('on'), 0);
+setTimeout(() => HINT.classList.remove('on'), 3000);
+
+function draw(M, PN) {
+  const g = HV.gl; if (!g) return;
+  const L = HV.L;
+  g.viewport(0, 0, HV.cv.width, HV.cv.height);
+  g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
+  g.uniform1f(L.uRim, rimS); g.uniform1f(L.uGR, grS);
+  g.uniform2f(L.uLD, LD[0], LD[1]);
+  g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, M); g.uniform1fv(L.uPin, PN);
+  g.drawArrays(g.TRIANGLES, 0, 3);
+}
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 1 / 30); last = now; T += dt;
+  spring(sc, dt);
+  br = .5 - .5 * Math.cos(T * TAU / 5);
+  vis = visNow(now);
+  const recLike = rec || now < shoutEnd, hold = rec;
+
+  // level: shout test, real mic when on, fake level otherwise
+  let vt = 0, bt = [0, 0, 0, 0, 0, 0];
+  if (now < shoutEnd) { vt = 1; bt = [1, 1, 1, 1, 1, 1]; }
+  else if (rec) {
+    // FROM core6: level sources
+    if (micState === 'on') { const a = micLevels(); vt = a.lvl; bt = a.bands; }
+    else {
+      vt = clamp(.5 + .5 * (.55 * Math.sin(T * 1.7) + .3 * Math.sin(T * 3.9 + 1.3) + .15 * Math.sin(T * 7.3) + (Math.random() * 2 - 1) * .3), 0, 1);
+      bt = bt.map((_, k) => .5 + .5 * Math.sin(T * (2 + .4 * k) + k * 2.3));
+    }
+  }
+  lvl += (vt - lvl) * Math.min(1, dt * 6);
+  avg += (lvl - avg) * Math.min(1, dt / .3);
+  for (let k = 0; k < 6; k++) BS[k] += (bt[k] - BS[k]) * .08;
+  rv += ((recLike ? 1 : 0) - rv) * Math.min(1, dt * 4);
+  rimS += ((recLike ? .6 + .4 * lvl : .45 + .15 * br + .05 * Math.max(0, 1 - (now - dropPulseT) / 1000)) - rimS) * .12;
+  grS += ((18 + 16 * lvl * rv) - grS) * .12;
+  if (rec) {
+    const s = Math.floor((now - recT0) / 1000);
+    if (s !== shown) { shown = s; MSG.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+  }
+  // FROM core6: onset ripple
+  if (recLike && lvl > avg + .12 && now - lastOnset > 150 && RIP.length < 3) { lastOnset = now; RIP.push({a0:Math.random() * TAU, t0:now}); }
+  for (let i = RIP.length - 1; i >= 0; i--) if (now - RIP[i].t0 > 700) RIP.splice(i, 1);
+
+  // pointer speed
+  const dts = Math.max(dt, 1e-3), mvx = (PX - lPX) / dts, mvy = (PY - lPY) / dts;
+  lPX = PX; lPY = PY;
+  psp = now - lastIn < 100 ? Math.hypot(mvx, mvy) : 0;
+  const moving = now - lastIn < 100;
+
+  // FROM core6: pull toward pointer while holding
+  let tx = 0, ty = 0;
+  if (hold) {
+    const dx = PX - W / 2, dy = PY - H * .8, d = Math.hypot(dx, dy) || 1, sc2 = Math.min(1, 48 / d);
+    tx = dx * sc2; ty = dy * sc2;
+  }
+  springXY(QX, tx, 60, 12, dt); springXY(QY, ty, 60, 12, dt);
+  const cx = W / 2 + QX.p, cy = H * .8 + QY.p, R = 72 * sc.x * (1 + .025 * (2 * br - 1));
+  CX = cx; CY = cy; RR = R;
+
+  // light: smoothed toward pointer (frame-time), idle orbit after 6s without input
+  let LTt;
+  if (now - lastIn < 6000) { const dx = PX - cx, dy = PY - cy, d = Math.hypot(dx, dy) || 1; LTt = [dx / d, dy / d]; }
+  else LTt = [Math.cos(T * TAU / 20), Math.sin(T * TAU / 20)];
+  const lk = 1 - Math.exp(-dt / P.lightLag);
+  LD[0] += (LTt[0] - LD[0]) * lk; LD[1] += (LTt[1] - LD[1]) * lk;
+  const ll = Math.hypot(LD[0], LD[1]) || 1; LD[0] /= ll; LD[1] /= ll;
+
+  // splash: loud level spawns droplets; tear: fast pointer near edge (idle) or in motion (holding)
+  tearCd = Math.max(0, tearCd - dt);
+  if (recLike && lvl > P.splashTh) {
+    spAcc = Math.min(2, spAcc + P.splashRate * (lvl - P.splashTh) / (1 - P.splashTh) * dt);
+    while (spAcc >= 1) { spAcc -= 1; const a = -Math.PI / 2 + (Math.random() * 2 - 1) * P.splashSpread * Math.PI / 180; spawnDrop(a, a, P.splashSpeed * lvl, cx, cy, R); }
+  } else spAcc = 0;
+  const pd = Math.hypot(PX - cx, PY - cy), pAng = Math.atan2(PY - cy, PX - cx), mAng = Math.atan2(mvy, mvx);
+  if (tearCd <= 0 && moving && psp > P.tearSpeed) {
+    if (hold) { const n = 1 + Math.floor(Math.random() * 3); for (let i = 0; i < n; i++) spawnDrop(mAng + (Math.random() - .5) * .6, mAng, P.splashSpeed * .6, cx, cy, R); tearCd = P.tearCool; }
+    else if (pd > .8 * R && pd < 1.4 * R) { const n = 1 + Math.floor(Math.random() * 2); for (let i = 0; i < n; i++) spawnDrop(pAng, mAng, P.splashSpeed * .3, cx, cy, R); tearCd = P.tearCool; }
+  }
+  for (let i = DR.length - 1; i >= 0; i--) {
+    const d = DR[i]; d.age += dt;
+    const f = Math.exp(-P.splashFric * dt); d.vx *= f; d.vy *= f;
+    if (d.age > P.splashDelay) { d.vx += (cx - d.x) * P.dropReturn * dt; d.vy += (cy - d.y) * P.dropReturn * dt; }
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    if (Math.hypot(d.x - cx, d.y - cy) < P.mergeR * R || d.age > 5) DR.splice(i, 1);
+  }
+
+  // drop: 6 band lobes (lobeMax), stretch toward pointer, ripples (rippleAmp), idle orbit drift +30%
+  const hb = [[cx, cy, R * .55 * (1 + .1 * Math.sin(T * 1.1)), 0]];
+  const kn = hold ? ((Math.round(Math.atan2(PY - cy, PX - cx) / (TAU / 6)) % 6) + 6) % 6 : -1;
+  for (let k = 0; k < 6; k++) {
+    ST[k] += ((k === kn ? .25 * R : 0) - ST[k]) * .1;
+    const a = k * TAU / 6, dd = .2 * R + BS[k] * P.lobeMax * R * rv + ST[k];
+    hb.push([cx + Math.cos(a) * dd, cy + Math.sin(a) * dd, .3 * R * rv, 0]);
+    hb.push([cx + Math.cos(a) * .5 * R, cy + Math.sin(a) * .5 * R, .25 * R * rv, 0]);
+  }
+  for (let i = 0; i < 4; i++) {
+    const a = TAU * T / (9 + i * 1.7) + i * TAU / 4, rad = Math.min(R * .55, R * (.45 + .1 * br) * 1.3);
+    hb.push([cx + Math.cos(a) * rad, cy + Math.sin(a * 1.2 + i) * rad * .75, (1 - rv) * R * .34 * (1 + .04 * Math.sin(T * 1.3 + i * 2)), 0]);
+  }
+  for (const r of RIP) {
+    const age = (now - r.t0) / 700, s = Math.max(0, 1 - age);
+    for (const dir of [-1, 1]) {
+      const a = r.a0 + dir * age * 1.6, dd = .55 * R + P.rippleAmp * R * s;
+      hb.push([cx + Math.cos(a) * dd, cy + Math.sin(a) * dd, (.04 + .08 * s) * R, 0]);
+    }
+  }
+
+  // poke: pointer moving near the drop pushes the nearest body ball away (springs back)
+  const near = !hold && moving && pd < P.pokeR * R;
+  const sf = clamp(psp / 600, 0, 1);
+  let pj = -1, pbd = 1e9;
+  if (near && sf > 0) for (let j = 0; j < 13; j++) { const d = Math.hypot(PX - hb[j][0], PY - hb[j][1]); if (d < pbd) { pbd = d; pj = j; } }
+  for (let j = 0; j < 13; j++) {
+    let ox = 0, oy = 0;
+    if (j === pj) { const ux = hb[j][0] - PX, uy = hb[j][1] - PY, ud = Math.hypot(ux, uy) || 1; ox = ux / ud * P.pokeMax * R * sf; oy = uy / ud * P.pokeMax * R * sf; }
+    springXY(PKX[j], ox, 60, 12, dt); springXY(PKY[j], oy, 60, 12, dt);
+    hb[j][0] += PKX[j].p; hb[j][1] += PKY[j].p;
+  }
+
+  // volume loss while droplets are out
+  const sr = DR.reduce((s, d) => s + d.r * d.r, 0), vol = Math.max(.82, Math.sqrt(1 - .5 * sr / (R * R)));
+  for (const b of hb) b[2] *= vol;
+  for (const d of DR) hb.push([d.x, d.y, d.r, 0]);
+
+  // release: droplet pinches off the top (300ms), then rises 180px over 1.4s while shrinking
+  if (drop) {
+    const e = performance.now() - drop.t0;
+    if (e < 300) hb.push([cx, cy - R * (.55 + .4 * e / 300), 10, 0]);
+    else {
+      const u = (e - 300) / 1400;
+      if (u >= 1) drop = null;
+      else hb.push([cx, cy - R * .95 - 180 * (1 - Math.pow(1 - u, 3)), 10 * (1 - u), 0]);
+    }
+  }
+  HV.B.fill(0); hb.slice(0, 40).forEach((b, k) => HV.B.set(b, k * 4));
+
+  // thoughts: rank 0 newest; homes on a soft ragged triangle; pinned excluded from ranks
+  let rk = 0;
+  for (const o of ORBS) o.rank = (o.pinned || o.state === 'leave' || o.state === 'gone' || o.state === 'merge') ? -1 : rk++;
+  for (const o of ORBS) {
+    const ph1 = Math.sin(T * TAU / o.P + o.ph) * 12, ph2 = Math.cos(T * TAU / (o.P * 1.3) + o.ph) * 10;
+    let hx = o.px + ph1, hy = o.py + ph2, rs = 1;
+    if (!o.pinned && o.rank >= 0) {
+      const tt = o.rank / 7, side = o.rank % 2 ? -1 : 1;
+      hx = W / 2 + side * .40 * W * Math.pow(tt, .8) * o.rn + .05 * W * Math.sin(T * TAU / 25 + o.ph) + ph1;
+      hy = (.5 + (.1 - .5) * Math.pow(tt, .7)) * H + ph2;
+      rs = 1.25 - .65 * tt;
+    }
+    o.hx = hx; o.hy = hy; o.rs = rs;
+
+    if (o.state === 'merge') {
+      const u = clamp((now - o.mT) / 400, 0, 1);
+      o.x = o.mx + (W / 2 - o.mx) * u; o.y = o.my + (H * .8 - o.my) * u; o.s = 1 - u;
+      if (u >= 1) { o.state = 'gone'; o.goneT = now; dropPulseT = now; }
+      continue;
+    }
+    if (o.state === 'gone') { if (now - o.goneT > 1500) { o.state = 'back'; o.s = 0; o.goneT = now; o.x = hx; o.y = hy; o.vx = o.vy = 0; } continue; }
+    if (o.state === 'leave') {
+      const u = clamp((now - o.leaveT) / (P.leaveT * 1000), 0, 1);
+      o.s = 1 - u; o.dim = 1 - u; o.x = o.lx; o.y = o.ly - (o.ly + 80) * u;
+      continue;
+    }
+    if (o.state === 'arrive') {
+      const u = clamp((now - o.arriveT) / (P.arriveT * 1000), 0, 1), e = 1 - Math.pow(1 - u, 3);
+      o.x = o.sx + (hx - o.sx) * e; o.y = o.sy + (hy - o.sy) * e; o.s = .6 + .4 * e; o.vx = o.vy = 0;
+      if (u >= 1) { o.state = 'ok'; o.s = 1; }
+    }
+    if (o.state === 'back') { o.s = Math.min(1, (now - o.goneT) / 300); if (o.s >= 1) o.state = 'ok'; }
+    if (o.x === null) { o.x = hx; o.y = hy; }
+    if (o.state === 'ok') {
+      if (o.grab && o.tx !== undefined) {
+        o.vx += ((o.tx - o.x) * 120 - o.vx * 16) * dt; o.vy += ((o.ty - o.y) * 120 - o.vy * 16) * dt;
+      } else {
+        o.vx += ((hx - o.x) * .8 - o.vx * 1.8) * dt; o.vy += ((hy - o.y) * .8 - o.vy * 1.8) * dt;
+        const f = Math.pow(.94, dt * 60); o.vx *= f; o.vy *= f;
+      }
+      o.x += o.vx * dt; o.y += o.vy * dt;
+    }
+    const sp = Math.hypot(o.vx, o.vy) || 1, so = Math.min(.4 * o.r, sp * .03);
+    o.ox = o.vx / sp * so; o.oy = o.vy / sp * so;
+    o.tw += ((o.grab ? .2 : (o.rank === 0 ? .11 : .07)) + (now - o.pulseT < 600 ? .3 * (1 - (now - o.pulseT) / 600) : 0) - o.tw) * .15;
+  }
+  for (let a = 0; a < ORBS.length; a++) for (let b = a + 1; b < ORBS.length; b++) {
+    const A = ORBS[a], B = ORBS[b];
+    if (A.state !== 'ok' || B.state !== 'ok' || A.grab || B.grab) continue;
+    const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 1, dmin = 2.4 * (A.r + B.r) / 2;
+    if (d < dmin) { const push = (dmin - d) * .5 / d; A.x -= dx * push; A.y -= dy * push; B.x += dx * push; B.y += dy * push; }
+  }
+  for (let i = ORBS.length - 1; i >= 0; i--) {
+    const o = ORBS[i];
+    if (o.state === 'leave' && now - o.leaveT > P.leaveT * 1000) { if (textOrb === o) textOrb = null; ORBS.splice(i, 1); }
+  }
+
+  const M = HV.M, PN = HV.PN; M.fill(0); PN.fill(0);
+  let k = 0;
+  for (const o of ORBS) {
+    if (o.state === 'gone' || (o.state === 'merge' && o.s <= 0) || o.x === null || k >= 10) continue;
+    const q = orbPos(o), rr = o.r * o.s, w = o.tw * vis * o.rs * o.dim + (o.pinned ? P.pinRim : 0);
+    M.set([q.x, q.y, rr, w], k * 8); M.set([q.x + o.ox, q.y + o.oy, rr * .8, w], k * 8 + 4);
+    PN[k] = o.pinned ? P.pinInner : 0;
+    k++;
+  }
+
+  // label: centered above the orb, shown while dragging (after 10px) or 2.5s after a tap
+  const t = textOrb && ORBS.includes(textOrb) ? textOrb : null;
+  const showing = t && !hidden && ((drag && drag.o === t && drag.moved > 10) || now - textShowT < 2500);
+  if (t) {
+    const q = orbPos(t);
+    NOTE.style.transform = `translate(${q.x}px,${q.y - t.r * t.s - P.labelGap}px) translate(-50%,-100%)`;
+    if (LBL.textContent !== t.text) LBL.textContent = t.text;
+  }
+  NOTE.classList.toggle('on', !!showing);
+
+  draw(M, PN);
+  requestAnimationFrame(frame);
+}
+let ST = [0, 0, 0, 0, 0, 0];
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

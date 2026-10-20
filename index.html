@@ -16,8 +16,6 @@ html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: 
 body { height: 100dvh; }
 iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 0; display: block; }
 #dev { position: fixed; right: calc(14px + env(safe-area-inset-right)); bottom: calc(14px + env(safe-area-inset-bottom)); width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font: 18px sans-serif; opacity: .7; z-index: 20; touch-action: none; padding: 0; }
-#dev.hidden { display: none; }
-#hot { position: fixed; left: 0; top: 0; width: 56px; height: 56px; z-index: 30; }
 #panel { position: fixed; left: 0; right: 0; bottom: 0; max-height: 70dvh; overflow: auto; background: #1b1b1b; color: #eee; font: 14px/1.4 system-ui, sans-serif; padding: 12px; padding-bottom: calc(12px + env(safe-area-inset-bottom)); box-sizing: border-box; border-radius: 14px 14px 0 0; z-index: 25; display: none; }
 #panel.open { display: block; }
 #panel button { background: #333; color: #eee; border: 0; border-radius: 8px; padding: 8px 12px; margin: 2px; font: inherit; }
@@ -31,10 +29,9 @@ iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 
 <body>
 <iframe id="frame" title="design"></iframe>
 <button id="dev" aria-label="Panel">&#9679;</button>
-<div id="hot"></div>
 <div id="panel">
   <div class="row"><button id="prev">&#9664;</button><span id="cur"></span><button id="next">&#9654;</button></div>
-  <div class="row"><button id="toggleAll">Wszystkie</button><button id="fs">Pełny ekran</button><button id="hide">Ukryj przycisk</button><button id="close">Zamknij</button></div>
+  <div class="row"><button id="toggleAll">Wszystkie</button><button id="fs">Pełny ekran</button><button id="zones"></button><button id="close">Zamknij</button></div>
   <div id="list" class="list"></div>
 </div>
 <script>
@@ -53,7 +50,7 @@ iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 
 
   function show(n, push, bust) {
     name = n;
-    frame.src = 'v/' + encodeURIComponent(n) + (bust ? '?r=' + Date.now() : '');
+    frame.src = 'v/' + encodeURIComponent(n) + '?' + (swap() ? 'zones=swap&' : '') + (bust ? 'r=' + Date.now() : '');
     store.set('proto.version', n);
     if (push) history.replaceState(null, '', '#' + encodeURIComponent(n));
     render();
@@ -131,16 +128,9 @@ iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 
   });
   dev.addEventListener('pointercancel', () => { drag = null; });
 
-  let taps = [];
-  $('hot').addEventListener('pointerdown', () => {
-    const t = Date.now();
-    taps = taps.filter(x => t - x < 1000).concat(t);
-    if (taps.length >= 3) {
-      taps = [];
-      store.set('proto.hidden', '');
-      dev.classList.remove('hidden');
-    }
-  });
+  const swap = () => store.get('proto.zones') === 'swap';
+  const zonesLabel = () => { $('zones').textContent = swap() ? 'Strefy: historia góra' : 'Strefy: mapa góra'; };
+  $('zones').onclick = () => { store.set('proto.zones', swap() ? '' : 'swap'); zonesLabel(); if (name) show(name, false, true); };
 
   $('prev').onclick = () => step(-1);
   $('next').onclick = () => step(1);
@@ -150,17 +140,13 @@ iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
     else document.documentElement.requestFullscreen?.().catch(() => {});
   };
-  $('hide').onclick = () => {
-    store.set('proto.hidden', '1');
-    dev.classList.add('hidden');
-    togglePanel(false);
-  };
   addEventListener('hashchange', () => {
     const h = fromHash();
     if (h && h !== name && names.includes(h)) show(h, false);
   });
 
-  if (store.get('proto.hidden') === '1') dev.classList.add('hidden');
+  try { store.set('proto.hidden', ''); } catch {}
+  zonesLabel();
   try {
     const p = JSON.parse(store.get('proto.pos') || 'null');
     if (p) place(p.l, p.t);

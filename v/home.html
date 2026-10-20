@@ -86,7 +86,7 @@ void main(){
   float sd=(f-1.)/gn;
   float m=smoothstep(-.7,.7,sd);
   float og=exp(-max(-sd,0.)/uGR);
-  float edge=uRW>0.?1.-smoothstep(0.,uRW,sd):1.-smoothstep(1.,1.8,f);
+  float edge=uRW>0.?(1.-smoothstep(0.,uRW,sd))*(1.-smoothstep(1.4,3.,f)):1.-smoothstep(1.,1.8,f);
   vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
   // lamp under the finger/cursor: original shading, direction toward the lamp point, its pull fading softly with distance (uLH)
   vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));
@@ -100,7 +100,7 @@ void main(){
   float bw=f2>0.?w2/f2:0.;
   float m2=smoothstep(.98,1.02,f2);
   float gn2=max(length(G2),1e-4);
-  float e2=uRW>0.?1.-smoothstep(0.,uRW*.8,(f2-1.)/gn2):1.-smoothstep(1.,1.8,f2);
+  float e2=uRW>0.?(1.-smoothstep(0.,uRW*.8,(f2-1.)/gn2))*(1.-smoothstep(1.4,3.,f2)):1.-smoothstep(1.,1.8,f2);
   // thoughts use the core's own shading scaled by their brightness bw (1 = exactly like the core); pinned = filled lit sphere
   vec3 N2=normalize(vec3(-G2/gn2*e2*.9,1.));
   float side2=max(dot(N2.xy,ld),0.);

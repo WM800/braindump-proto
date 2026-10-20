@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <link rel="icon" href="data:,">
-<title>Braindump — home11 · Calm engine</title>
+<title>Braindump — home</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;background:#000;color:#8A8A8A;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;overflow:hidden}
@@ -52,17 +52,17 @@ const P0 = {
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:70, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:70, cutR:38, cutIn:5, cutOut:1.2, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
   lightLag:.25, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
-  topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.35, stagger:.6, repel:12, cohesion:1, tailK:40, tailC:8, arriveT:2.4, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
+  topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.08, homeRate:.15, homeGap:70, gapBreath:.2, wander:1.8, stagger:.6, repel:1.5, cohesion:.15, tailK:40, tailC:8, arriveT:5, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
   // pin: stays where dropped, slow soft aura + wave
-  pinHold:500, pinRim:.08, pinInner:.03, pinFric:3, auraI:.25, auraScale:.9, auraDur:2.4, glowI:.05};
+  pinHold:500, pinRim:.16, pinInner:.06, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v11')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v13')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -219,7 +219,7 @@ function addWave(x, y, amp) {
 function addThought(now) {
   const d = new Date(), tm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   const o = mkOrb('New thought ' + tm);
-  o.state = 'arrive'; o.arriveT = now; o.sx = CX; o.sy = CY - RR * .95; o.x = o.sx; o.y = o.sy; o.s = .6;
+  o.state = 'arrive'; o.arriveT = now; o.hx = W / 2 + (o.fx - .5) * 40; o.hy = H * P.bottomY; o.sx = CX; o.sy = CY - RR * .95; o.x = o.sx; o.y = o.sy; o.s = .6;
   ORBS.unshift(o);
   const free = ORBS.filter(q => !q.pinned && q.state !== 'leave' && q.state !== 'gone' && q.state !== 'merge');
   for (let i = P.maxThoughts; i < free.length; i++) { const q = free[i]; q.state = 'leave'; q.leaveT = now; q.lx = q.x; q.ly = q.y; }
@@ -235,7 +235,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v11', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v13', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {
@@ -358,6 +358,22 @@ function fingerForce(o, r, scale) {
   o.ay += (dy / d * P.fingerPush + (FVY - o.vy) * P.fingerDrag) * w;
 }
 
+// finger cut: held finger is a hole in the water; targets near it move out, links across it break
+let cutS = 0;
+function cutT(o, r) {
+  if (cutS < .01) return;
+  const dx = o.tx - PX, dy = o.ty - PY, d = Math.hypot(dx, dy), dm = (P.cutR + r) * cutS;
+  if (d >= dm) return;
+  let ux = dx / (d || 1), uy = dy / (d || 1);
+  if (d < 1) { if (psp) { ux = -FVY / psp; uy = FVX / psp; } else { ux = 0; uy = -1; } }
+  o.tx += ux * (dm - d); o.ty += uy * (dm - d);
+}
+function cutLink(a, b) {
+  if (cutS < .01) return false;
+  const ex = b.x - a.x, ey = b.y - a.y, L = ex * ex + ey * ey || 1, t = clamp(((PX - a.x) * ex + (PY - a.y) * ey) / L, 0, 1);
+  return Math.hypot(a.x + ex * t - PX, a.y + ey * t - PY) < P.cutR * cutS;
+}
+
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 1 / 30); last = now; T += dt;
   spring(sc, dt);
@@ -365,6 +381,7 @@ function frame(now) {
   vis = visNow(now);
   const recLike = rec || now < shoutEnd, hold = rec;
   const fing = !!(swipe && pts.has(swipe.id));
+  cutS += ((fing ? 1 : 0) - cutS) * Math.min(1, dt * (fing ? P.cutIn : P.cutOut));
 
   // level: shout test, real mic when on, fake level otherwise (FROM core6)
   let vt = 0, bt = [0, 0, 0, 0, 0, 0];
@@ -452,6 +469,7 @@ function frame(now) {
     c.tx = cx + Math.cos(a) * rho; c.ty = cy + Math.sin(a) * rho * (1 - .08 * (1 - rv));
     c.r = c.rf * R * P.coreScale * (1 + .05 * Math.sin(T * 1.3 + c.a * 2));
     if (c.x === null) { c.x = c.tx; c.y = c.ty; }
+    cutT(c, c.r);
   }
   // onset: the voice "hits" a few petals outward
   if (recLike && lvl > avg + .12 && now - lastOnset > 150) {
@@ -467,9 +485,10 @@ function frame(now) {
     for (let j = 0; j < CORE.length; j++) {
       const o = CORE[j]; if (j === i) continue;
       const L0 = Math.hypot(c.tx - o.tx, c.ty - o.ty), dx = o.x - c.x, dy = o.y - c.y, d = Math.hypot(dx, dy) || 1;
-      if (d > L0) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
+      if (d > L0 && !cutLink(c, o)) { const f = P.kLink * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
     }
     if (fing) fingerForce(c, c.r, 1);
+    { const dx = c.x - PX, dy = c.y - PY, d = Math.hypot(dx, dy) || 1, dm = (P.cutR + c.r) * cutS; if (d < dm) { c.ax += dx / d * (dm - d) * k * 2; c.ay += dy / d * (dm - d) * k * 2; } }
     if (hold) {
       const ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1;
       const face = Math.max(0, (ux * (PX - cx) + uy * (PY - cy)) / (ud * pdl)), w = face * face * (c.band < 0 ? .3 : 1);
@@ -497,6 +516,7 @@ function frame(now) {
   const hb = CORE.map(c => [c.x, c.y, c.r * vol, clamp(P.smallLight + (1 - P.smallLight) * (c.r / (.4 * R) - .35) / .65, P.smallLight, 1)]);
   for (const d of DR) hb.push([d.x, d.y, d.r, P.dropLight]);
   // release: droplet pinches off the top (300ms), then rises (FROM core6)
+  if (drop && !P.dropAnim) drop = null;
   if (drop) {
     const e = now - drop.t0;
     if (e < 300) hb.push([cx, cy - R * (.55 + .4 * e / 300), 10, 1]);
@@ -508,16 +528,27 @@ function frame(now) {
   let rk = 0;
   for (const o of ORBS) o.rank = (o.pinned || o.state === 'leave' || o.state === 'gone' || o.state === 'merge') ? -1 : rk++;
   const SL = slots();
+  // homes relax slowly: irregular, breathing spacing; neighbours make room, far ones drift closer (no slot shuffling)
+  const HO = ORBS.filter(o => o.rank >= 0 && o.hx !== 0);
+  for (let a = 0; a < HO.length; a++) for (let b = a + 1; b < HO.length; b++) {
+    const A = HO[a], B = HO[b], dx = B.hx - A.hx, dy = B.hy - A.hy, d = Math.hypot(dx, dy) || 1;
+    const g = P.homeGap * (.7 + .3 * (A.fx + B.fx)) * (1 + P.gapBreath * Math.sin(T * TAU / 40 + A.ph + B.ph));
+    let m = 0;
+    if (d < g) m = (g - d) * .5; else if (d < 1.8 * g) m = -(d - g) * .08;
+    if (!m) continue;
+    m *= Math.min(1, dt * P.homeRate); const ux = dx / d, uy = dy / d;
+    A.hx -= ux * m; A.hy -= uy * m * .5; B.hx += ux * m; B.hy += uy * m * .5;
+  }
+  for (const o of HO) o.hx = clamp(o.hx, W * .08, W * .92);
   for (const o of ORBS) {
-    const ph1 = Math.sin(T * TAU / o.P + o.ph) * 10, ph2 = Math.cos(T * TAU / (o.P * 1.3) + o.ph) * 8;
+    const ph1 = Math.sin(T * TAU / (o.P * P.wander) + o.ph) * 16, ph2 = Math.cos(T * TAU / (o.P * P.wander * 1.3) + o.ph) * 12;
     let hx = o.px + ph1 * .4, hy = o.py + ph2 * .4, tt = 0;
     if (!o.pinned && o.rank >= 0) {
       tt = Math.min(1, o.rank / Math.max(1, P.maxThoughts - 1));
-      if (o.lastRank !== o.rank) { o.lastRank = o.rank; o.applyAt = now + o.rank * P.stagger * 1000; if (o.hx === 0) o.applyAt = now; }
-      if (now >= o.applyAt) {
-        const sl = SL[Math.min(o.rank, SL.length - 1)];
-        o.hx = sl[0] + o.fx * P.jitter * W; o.hy = sl[1] + o.ry * P.jitterY * H;
-      }
+      const sl = SL[Math.min(o.rank, SL.length - 1)];
+      if (o.hx === 0) { o.hx = sl[0] + o.fx * P.jitter * W; o.hy = sl[1] + o.ry * P.jitterY * H; }
+      // older rise slowly (only height follows rank; x stays where the orb lives)
+      o.hy += (sl[1] + o.ry * P.jitterY * H - o.hy) * Math.min(1, dt * P.homeRate * .3);
       hx = o.hx + ph1; hy = o.hy + ph2;
     }
     o.rs = o.pinned ? 1 : P.newB + (P.oldB - P.newB) * tt;
@@ -549,12 +580,12 @@ function frame(now) {
     else if (o.pinned) {
       o.ax -= o.vx * P.pinFric; o.ay -= o.vy * P.pinFric;
       const dx = o.x - CX, dy = o.y - CY, d = Math.hypot(dx, dy) || 1, dm = RR * 1.3 + o.r;
-      if (d < dm) { o.ax += dx / d * (dm - d) * 8; o.ay += dy / d * (dm - d) * 8; }
+      if (d < dm) { o.ax += dx / d * (dm - d) * P.pinPush; o.ay += dy / d * (dm - d) * P.pinPush; }
       const m = o.r + 10;
       if (o.x < m) o.ax += (m - o.x) * 6; if (o.x > W - m) o.ax -= (o.x - W + m) * 6;
       if (o.y < m) o.ay += (m - o.y) * 6; if (o.y > H - m) o.ay -= (o.y - H + m) * 6;
     }
-    else { const hc = 2 * Math.sqrt(P.homeK); o.ax += (hx - o.x) * P.homeK - o.vx * hc; o.ay += (hy - o.y) * P.homeK - o.vy * hc; if (fing) fingerForce(o, o.r, .5); }
+    else { const ct = {tx:hx, ty:hy}; cutT(ct, o.r); hx = ct.tx; hy = ct.ty; const hc = 2 * Math.sqrt(P.homeK); o.ax += (hx - o.x) * P.homeK - o.vx * hc; o.ay += (hy - o.y) * P.homeK - o.vy * hc; o.ax -= o.vx * .6; o.ay -= o.vy * .6; if (fing) fingerForce(o, o.r, .5); }
   }
   // orb ↔ orb: soft repulsion when close, weak gravity at mid range (the arriving one pushes its neighbours)
   for (let a = 0; a < ORBS.length; a++) for (let b = a + 1; b < ORBS.length; b++) {

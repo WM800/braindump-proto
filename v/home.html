@@ -52,7 +52,7 @@ const P0 = {
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.09, cutDrag:.04, cutHold:.9, cutHeal:1.6, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.15, gapK:120, healRate:1.2, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:1.2, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
@@ -401,10 +401,10 @@ function fracture(now, dt, dts, vol, fing) {
         const t = clamp(((x - lFX) * ex + (y - lFY) * ey) / (L * L), 0, 1), px = lFX + ex * t, py = lFY + ey * t, sd = (x - px) * nx + (y - py) * ny, d = Math.hypot(x - px, y - py);
         if (d > r + bw) continue;
         hit = true;
-        if (Math.abs(sd) < r * .75 && d < r * .9 && r > P.fragMin && FR.length < P.maxFrags) {
+        if (Math.abs(sd) < r * .75 && d < r * .9 && r > P.fragMin && FR.length < P.maxFrags && !(now - (q.ct || -1e9) < 250)) {
           const k = r * .7071 * .55, bx = px - q.c.x, by = py - q.c.y, dvx = ux * v * P.cutDrag, dvy = uy * v * P.cutDrag;
-          const A = {c:q.c, m:q.m / 2, ox:bx + nx * k, oy:by + ny * k, vx:q.vx + nx * imp + dvx, vy:q.vy + ny * imp + dvy, rx:q.rx + nx * k, ry:q.ry + ny * k, g:0, x:0, y:0, r:0};
-          const B = {c:q.c, m:q.m / 2, ox:bx - nx * k, oy:by - ny * k, vx:q.vx - nx * imp + dvx, vy:q.vy - ny * imp + dvy, rx:q.rx - nx * k, ry:q.ry - ny * k, g:0, x:0, y:0, r:0};
+          const A = {c:q.c, m:q.m / 2, ox:bx + nx * k, oy:by + ny * k, vx:q.vx + nx * imp + dvx, vy:q.vy + ny * imp + dvy, rx:q.rx + nx * k, ry:q.ry + ny * k, g:0, x:0, y:0, r:0, ct:now};
+          const B = {c:q.c, m:q.m / 2, ox:bx - nx * k, oy:by - ny * k, vx:q.vx - nx * imp + dvx, vy:q.vy - ny * imp + dvy, rx:q.rx - nx * k, ry:q.ry - ny * k, g:0, x:0, y:0, r:0, ct:now};
           FR.splice(i, 1, A, B);
         } else {
           const w = 1 - clamp((d - r * .75) / (r * .25 + bw), 0, 1), sg = Math.sign(sd || 1);
@@ -416,7 +416,7 @@ function fracture(now, dt, dts, vol, fing) {
   }
   // separation amount: on while cutting, heals smoothly after cutHold
   const cutting = now - lastCut < P.cutHold * 1000;
-  sepAmt += ((cutting ? 1 : 0) - sepAmt) * Math.min(1, dt * (cutting ? 12 : 1 / Math.max(.1, P.cutHeal)));
+  sepAmt = cutting ? sepAmt + (1 - sepAmt) * Math.min(1, dt * 12) : Math.max(0, sepAmt - dt / Math.max(.1, P.cutHeal));
   if (!cutting && sepAmt < .005) { sepAmt = 0; STK.length = 0; }
   // groups: fragments are bonded when close and no stroke lies between them
   const n = FR.length;
@@ -440,7 +440,7 @@ function fracture(now, dt, dts, vol, fing) {
     let ax = (a.rx - a.ox) * kF - a.vx * cF, ay = (a.ry - a.oy) * kF - a.vy * cF;
     if (sepAmt > .01) for (let j = 0; j < n; j++) {
       const b = FR[j]; if (j === i || b.g === a.g) continue;
-      const dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1, ov = a.r + b.r + gap - d;
+      const dx = a.x - b.x, dy = a.y - b.y, d = Math.hypot(dx, dy) || 1, ov = (a.r + b.r) * P.contact + gap - d;
       if (ov > 0) { ax += dx / d * ov * P.gapK; ay += dy / d * ov * P.gapK; }
     }
     a.vx += ax * dt; a.vy += ay * dt;

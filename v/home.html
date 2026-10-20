@@ -545,7 +545,7 @@ function frame(now) {
     c.cdx = c.cdx || 0; c.cdy = c.cdy || 0; const ce = Math.min(1, dt * P.cutEase);
     c.cdx += (c.tx - tx0 - c.cdx) * ce; c.cdy += (c.ty - ty0 - c.cdy) * ce; c.tx = tx0 + c.cdx; c.ty = ty0 + c.cdy;
     // only balls touched by the cut get a crisper field (s), the rest of the body renders exactly as idle
-    c.sh = clamp(Math.max(Math.hypot(c.cdx, c.cdy), (c.hs || 0) * 2) / (c.r * .3), 0, 1);
+    c.sh = (c.sh || 0) + ((c.st ? clamp((c.hs || 0) / (c.r * .5), 0, 1) : 0) - (c.sh || 0)) * Math.min(1, dt * 3);
   }
   // onset: the voice "hits" a few petals outward
   if (recLike && lvl > avg + .12 && now - lastOnset > 150) {

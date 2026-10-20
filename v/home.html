@@ -11,6 +11,11 @@ html,body{height:100%;background:#000;color:#8A8A8A;font-family:Inter,system-ui,
 body{display:flex;align-items:center;justify-content:center}
 .phone{position:relative;width:390px;height:844px;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
 @media (max-width:500px){.phone{width:100vw;height:100vh;height:100dvh}}
+#map{opacity:0}
+#mnote{position:absolute;left:0;top:0;max-width:200px;font:13px/1.35 system-ui,"Segoe UI",sans-serif;text-align:center;color:rgba(255,255,255,.7);text-shadow:0 0 14px #000;pointer-events:none;opacity:0;transition:opacity .22s}
+#mnote.on{opacity:1}
+#mhint{position:absolute;left:0;right:0;bottom:28px;text-align:center;font-size:11px;color:#333;opacity:0;transition:opacity 1s;pointer-events:none}
+#mhint.on{opacity:1}
 canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-action:none}
 #msg{position:absolute;left:0;right:0;top:60%;text-align:center;font-size:13px;letter-spacing:.02em;color:#8A8A8A;opacity:0;transition:opacity .4s;pointer-events:none}
 #msg.on{opacity:1}
@@ -31,6 +36,9 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 <body>
 <div class="phone" id="phone">
   <canvas id="gl"></canvas>
+  <canvas id="map"></canvas>
+  <div id="mnote"></div>
+  <div id="mhint">pinch to zoom · swipe up from the bottom to go back</div>
   <div id="hint">double-tap to hide thoughts</div>
   <div id="msg"></div>
   <div id="mic">mic off</div>
@@ -60,7 +68,9 @@ const P0 = {
   // thoughts: slow upward stream, critically damped (no bounce)
   topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.08, homeRate:.15, homeGap:95, homePull:.02, gapBreath:.2, wander:1.8, stagger:.6, repel:5, cohesion:.15, tailK:40, tailC:8, arriveT:5, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
   // pin: stays where dropped, slow soft aura + wave
-  pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5};
+  pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
+  // thought map: one field (nodes + synapses + dendrites), same shading as the core
+  mapDpr:1.5, mapSharp:1.6, mapNodeR:1, synW:1.5, synCone:.6, synNeck:.24, synBend:.14, synWave:.06, synLen:130, synK:6, mapRepel:90000, mapPull:.05, mapDamp:3, mapDrift:6, dendN:3, dendLen:1.15, dendW:.24, dendWiggle:.25, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:2.2, mapExit:1.4};
 const P = Object.assign({}, P0);
 try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v30')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
@@ -262,7 +272,7 @@ function spawnDrop(posAng, velAng, spd) {
 
 function save() { try { localStorage.setItem('bd_tune_v30', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
-const INT = {maxThoughts:9, maxDrops:30};
+const INT = {maxThoughts:9, maxDrops:30, dendN:5};
 const META = Object.keys(P0).map(k => {
   const v = P0[k], mx = INT[k] || (v === 0 ? 1 : v <= 1 ? Math.max(1, v * 3) : v * 3);
   return [k, 0, +mx.toFixed(3), INT[k] ? 1 : +(mx / 200).toPrecision(2)];
@@ -289,6 +299,7 @@ DEV.addEventListener('pointerup', e => e.stopPropagation());
 PH.addEventListener('pointerdown', e => {
   const p = pt(e), now = performance.now();
   if (p.x > W - 56 && p.y < 56) { corner = corner.filter(t => now - t < 900); corner.push(now); if (corner.length >= 3) { corner = []; toggleDev(); } return; }
+  if (MAP.on) { mapDown(e, p, now); return; }
   pts.set(e.pointerId, p); PX = p.x; PY = p.y; lPX = p.x; lPY = p.y; lastIn = now;
   if (pts.size === 2) { if (drag) { drag.o.grab = false; clearTimeout(drag.lp); drag = null; } swipe = null; toggle(now); return; }
   if (vis > .5 && !hidden) {
@@ -303,11 +314,12 @@ PH.addEventListener('pointerdown', e => {
     }
   }
   if (Math.hypot(p.x - CX, p.y - CY) < RR * 1.15 + (e.pointerType === 'touch' ? 18 : 6)) { grabP = {id:e.pointerId, x0:p.x, y0:p.y, t0:now, moved:0}; return; }
-  swipe = {id:e.pointerId, lx:p.x, ly:p.y, acc:0};
+  swipe = {id:e.pointerId, lx:p.x, ly:p.y, acc:0, x0:p.x, y0:p.y};
   if (now - lastEmpty < 300) { lastEmpty = -1e9; toggle(now); return; }
   lastEmpty = now;
 });
 window.addEventListener('pointermove', e => {
+  if (MAP.on) { mapMove(e); return; }
   if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
   if (grabP && e.pointerId === grabP.id) { const p = pt(e); grabP.moved = Math.max(grabP.moved, Math.hypot(p.x - grabP.x0, p.y - grabP.y0)); }
   const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
@@ -320,11 +332,13 @@ window.addEventListener('pointermove', e => {
   drag.o.gx = p.x; drag.o.gy = p.y;
 });
 function end(e) {
+  if (MAP.on) { mapUp(e); return; }
   if (grabP && e.pointerId === grabP.id) {
     if (e.type === 'pointerup' && grabP.moved < (e.pointerType === 'touch' ? 18 : 10) && performance.now() - grabP.t0 < 450) { if (rec) stopRec(); else startRec(); }
     grabP = null;
   }
-  if (swipe && e.pointerId === swipe.id) swipe = null;
+  // pull down from the upper third = thought map
+  if (swipe && e.pointerId === swipe.id) { const p = pt(e), dy = p.y - swipe.y0; if (e.type === 'pointerup' && swipe.y0 < H * .35 && dy > 120 && Math.abs(p.x - swipe.x0) < dy * .6) mapEnter(performance.now()); swipe = null; }
   pts.delete(e.pointerId);
   if (!drag || e.pointerId !== drag.id) return;
   const o = drag.o, now = performance.now();
@@ -339,7 +353,7 @@ window.addEventListener('pointerup', end);
 window.addEventListener('pointercancel', end);
 window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase(), now = performance.now();
-  if (k === 't') toggle(now); else if (k === 'd') toggleDev(); else if (k === 'n') addThought(now);
+  if (k === 'm') { if (MAP.on && MAP.dir > 0) mapExit(now); else if (!MAP.on || MAP.dir < 0) mapEnter(now); } else if (k === 'escape' && MAP.on) mapExit(now); else if (MAP.on) return; else if (k === 't') toggle(now); else if (k === 'd') toggleDev(); else if (k === 'n') addThought(now);
 });
 setTimeout(() => HINT.classList.add('on'), 0);
 setTimeout(() => HINT.classList.remove('on'), 3000);
@@ -539,6 +553,7 @@ function cutLink(a, b) {
 }
 
 function frame(now) {
+  if (MAP.on && MAP.a >= 1) { last = now; mapFrame(now); requestAnimationFrame(frame); return; }
   const dt = clamp((now - last) / 1000, 0, 1 / 30); last = now; T += dt;
   spring(sc, dt);
   br = .5 - .5 * Math.cos(T * TAU / 5);
@@ -898,7 +913,259 @@ function frame(now) {
   NOTE.classList.toggle('on', !!showing);
 
   draw();
+  if (MAP.on) mapFrame(now);
   requestAnimationFrame(frame);
+}
+// ===== THOUGHT MAP (pull down from the top): every thought is a cell; synapses = a cone out of each cell thinning into an axon,
+// dendrites = short tapered feelers. Nodes, synapses and dendrites are ONE field with the core's shading, so joins read as one body.
+// Segments of one chain (one axon / one feeler) take the max, chains and cells add — no beads at the sub-segment joints.
+const MFS = `precision highp float;
+uniform vec2 uRes,uLP;uniform float uDpr,uRim,uGR,uK,uMW,uLG,uLH,uNN,uNS;
+uniform vec4 uN[12];uniform vec4 uS[88];uniform vec4 uR[88];
+void main(){
+  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
+  float f=0.,lw=0.;vec2 G=vec2(0.);
+  for(int i=0;i<12;i++){if(float(i)>=uNN)break;vec4 b=uN[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float q=pow(b.z*b.z/d2,uK);f+=q;G+=-2.*uK*q*dv/d2;lw+=q*b.w;}
+  float cm=0.,cw=0.,cid=-1.;vec2 cg=vec2(0.);
+  for(int i=0;i<88;i++){if(float(i)>=uNS)break;vec4 s=uS[i];vec4 r=uR[i];
+    if(r.w!=cid){f+=cm;G+=cg;lw+=cm*cw;cm=0.;cg=vec2(0.);cid=r.w;}
+    vec2 ab=s.zw-s.xy;float t=clamp(dot(p-s.xy,ab)/max(dot(ab,ab),1e-4),0.,1.);vec2 dv=p-s.xy-ab*t;float d2=max(dot(dv,dv),.25);float rr=mix(r.x,r.y,t);
+    if(d2>rr*rr*64.)continue;
+    float q=pow(rr*rr/d2,uK);if(q>cm){cm=q;cg=-2.*uK*q*dv/d2;cw=r.z;}}
+  f+=cm;G+=cg;lw+=cm*cw;
+  float lwn=f>0.?lw/f:1.;
+  float gn=max(length(G),1e-4);
+  float sd=(f-1.)/gn;
+  float m=smoothstep(-.7,.7,sd);
+  float og=exp(-max(-sd,0.)/uGR);
+  float edge=1.-smoothstep(0.,uMW,log(max(f,1e-4))*f/gn);
+  vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
+  vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));
+  vec3 Lv=normalize(vec3(ld*.6,.8)),Hv=normalize(Lv+vec3(0.,0.,1.));
+  float side=max(dot(N.xy,ld),0.);
+  float rim=edge*edge*uRim*(.6+uLG*side*side*att)*lwn;
+  float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn*(.4+.6*att);
+  float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
+  gl_FragColor=vec4(vec3(c),1.);
+}`;
+const MAP = {on:false, a:0, dir:0, last:0, N:[], L:[], cam:{z:1, x:0, y:0}, pts:new Map(), pinch:null, stroke:null, lab:null, labT:-1e9, lp:[0, 0], inT:-1e9,
+  S:new Float32Array(352), R:new Float32Array(352), NB:new Float32Array(48), ns:0, el:$('#map'), note:$('#mnote'), hint:$('#mhint'), v:null};
+const sm5 = x => { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); };
+function mapView() {
+  const cv = MAP.el, g = cv.getContext('webgl', {alpha:false, antialias:false}), v = {g, L:{}};
+  if (!g) return v;
+  const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); if (!g.getShaderParameter(o, g.COMPILE_STATUS)) console.error(g.getShaderInfoLog(o)); return o; };
+  const pr = g.createProgram();
+  g.attachShader(pr, sh(g.VERTEX_SHADER, VS)); g.attachShader(pr, sh(g.FRAGMENT_SHADER, MFS)); g.linkProgram(pr); g.useProgram(pr);
+  g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer()); g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+  const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
+  ['uRes','uLP','uDpr','uRim','uGR','uK','uMW','uLG','uLH','uNN','uNS','uN','uS','uR'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  return v;
+}
+function mapSize() {
+  const d = Math.min(DPR, Math.max(.5, P.mapDpr));
+  MAP.dpr = d; MAP.el.width = Math.round(W * d); MAP.el.height = Math.round(H * d); MAP.el.style.width = W + 'px'; MAP.el.style.height = H + 'px';
+}
+window.addEventListener('resize', () => { if (MAP.on) mapSize(); });
+const w2s = (x, y) => [x * MAP.cam.z + MAP.cam.x, y * MAP.cam.z + MAP.cam.y];
+function mapBuild() {
+  const src = ORBS.filter(o => o.state === 'ok').slice(0, 12), N = [];
+  src.forEach((o, i) => N.push({o, text:o.text, pin:o.pinned, i}));
+  for (const t of TEXTS) { if (N.length >= 6) break; if (!N.some(n => n.text === t)) N.push({o:null, text:t, pin:false, i:N.length}); }
+  const cx = W / 2, cy = H * .48;
+  N.forEach((n, i) => {
+    const a = i * 2.4, rr = 30 + 52 * Math.sqrt(i);
+    Object.assign(n, {x:cx + Math.cos(a) * rr, y:cy + Math.sin(a) * rr, vx:0, vy:0, ph:hsh(i * 4.7) * TAU, w:n.pin ? 1 : .62 + .38 * (1 - i / N.length),
+      r:(n.pin ? 22 : 14 + 6 * (1 - i / N.length)) * P.mapNodeR, d:i / N.length * .25,
+      den:Array.from({length:P.dendN | 0}, (_, k) => ({a:(k + .5 + .35 * hsh(i * 9 + k)) * TAU / Math.max(1, P.dendN | 0), l:.7 + .3 * Math.abs(hsh(i * 3 + k * 7)), b:hsh(i * 13 + k) * .7, ph:hsh(i + k * 31) * TAU}))});
+  });
+  // layout first (repulsion only), then wire neighbours: spanning tree + a couple of short non-crossing extras
+  MAP.N = N; MAP.L = [];
+  for (let s = 0; s < 200; s++) mapPhys(1 / 60, true);
+  const L = [], dd = (a, b) => Math.hypot(a.x - b.x, a.y - b.y), cross = (a, b) => L.some(l => l.a !== a && l.b !== a && l.a !== b && l.b !== b && segU(a.x, a.y, b.x, b.y, l.a.x, l.a.y, l.b.x, l.b.y) >= 0);
+  const inT = new Set([N[0]]);
+  while (inT.size < N.length) { let best = null; for (const a of inT) for (const b of N) if (!inT.has(b) && (!best || dd(a, b) < dd(best[0], best[1]))) best = [a, b]; L.push({a:best[0], b:best[1]}); inT.add(best[1]); }
+  const ex = []; for (let i = 0; i < N.length; i++) for (let j = i + 1; j < N.length; j++) if (!L.some(l => (l.a === N[i] && l.b === N[j]) || (l.a === N[j] && l.b === N[i]))) ex.push([N[i], N[j]]);
+  ex.sort((p, q) => dd(p[0], p[1]) - dd(q[0], q[1]));
+  let add = Math.round(N.length / 4); for (const [a, b] of ex) { if (add <= 0) break; if (!cross(a, b)) { L.push({a, b}); add--; } }
+  L.forEach((l, k) => Object.assign(l, {k, ph:hsh(k * 2.9) * TAU, st:'ok', u:.5, tc:0, poly:[]}));
+  MAP.L = L;
+  // feelers point away from the synapses
+  for (const n of N) {
+    const ang = L.filter(l => l.a === n || l.b === n).map(l => { const o = l.a === n ? l.b : l.a; return Math.atan2(o.y - n.y, o.x - n.x); });
+    for (const f of n.den) for (let it = 0; it < 6; it++) for (const a of ang) { let d = Math.atan2(Math.sin(f.a - a), Math.cos(f.a - a)); if (Math.abs(d) < .9) f.a += (d >= 0 ? 1 : -1) * (.9 - Math.abs(d)) * .6; }
+  }
+  for (let s = 0; s < 200; s++) mapPhys(1 / 60, true);
+}
+function mapEnter(now) {
+  if (MAP.on) { MAP.dir = 1; return; }
+  if (!MAP.v) MAP.v = mapView();
+  mapSize(); MAP.cam = {z:1, x:0, y:0}; mapBuild();
+  MAP.on = true; MAP.dir = 1; MAP.a = 0; MAP.last = now; MAP.lp = [W / 2, H * .45]; MAP.lab = null; MAP.pts.clear(); MAP.pinch = null; MAP.stroke = null;
+  drag = null; swipe = null; grabP = null; pts.clear(); NOTE.classList.remove('on');
+  MAP.hint.classList.add('on'); setTimeout(() => MAP.hint.classList.remove('on'), 3200);
+}
+function mapExit(now) { MAP.dir = -1; MAP.lab = null; MAP.pinch = null; MAP.stroke = null; MAP.hint.classList.remove('on'); }
+function mapPhys(dt, settle) {
+  const N = MAP.N, cx = W / 2, cy = H * .48;
+  for (const n of N) { n.ax = (cx - n.x) * P.mapPull + (settle ? 0 : P.mapDrift * vnoise(T * .12 + n.ph * 3)); n.ay = (cy - n.y) * P.mapPull + (settle ? 0 : P.mapDrift * vnoise(T * .1 + n.ph * 5 + 9)); }
+  for (let i = 0; i < N.length; i++) for (let j = i + 1; j < N.length; j++) {
+    const A = N[i], B = N[j], dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy + 400, d = Math.sqrt(d2), f = P.mapRepel / d2;
+    A.ax -= dx / d * f; A.ay -= dy / d * f; B.ax += dx / d * f; B.ay += dy / d * f;
+  }
+  for (const l of MAP.L) {
+    if (l.st !== 'ok') continue;
+    const A = l.a, B = l.b, dx = B.x - A.x, dy = B.y - A.y, d = Math.max(1, Math.hypot(dx, dy)), f = P.synK * (d - P.synLen) * .1;
+    A.ax += dx / d * f; A.ay += dy / d * f; B.ax -= dx / d * f; B.ay -= dy / d * f;
+  }
+  const dmp = Math.exp(-P.mapDamp * dt);
+  for (const n of N) { n.vx = (n.vx + n.ax * dt) * dmp; n.vy = (n.vy + n.ay * dt) * dmp; n.x += n.vx * dt; n.y += n.vy * dt; }
+}
+// segment ab vs cd: parameter along ab, or -1
+function segU(ax, ay, bx, by, cx2, cy2, dx, dy) {
+  const d1x = bx - ax, d1y = by - ay, d2x = dx - cx2, d2y = dy - cy2, den = d1x * d2y - d1y * d2x;
+  if (Math.abs(den) < 1e-9) return -1;
+  const t = ((cx2 - ax) * d2y - (cy2 - ay) * d2x) / den, u = ((cx2 - ax) * d1y - (cy2 - ay) * d1x) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : -1;
+}
+function mapCut(x0, y0, x1, y1, now) {
+  for (const l of MAP.L) {
+    if (l.st !== 'ok' || l.poly.length < 2) continue;
+    for (let i = 0; i < l.poly.length - 1; i++) {
+      const a = l.poly[i], b = l.poly[i + 1], t = segU(a[0], a[1], b[0], b[1], x0, y0, x1, y1);
+      if (t < 0) continue;
+      const u = clamp(a[2] + (b[2] - a[2]) * t, .15, .85);
+      if (u < .2 || u > .8) break;
+      l.st = 'cut'; l.u = u; l.tc = now;
+      const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.max(1, Math.hypot(dx, dy));
+      l.a.vx -= dx / d * 70; l.a.vy -= dy / d * 70; l.b.vx += dx / d * 70; l.b.vy += dy / d * 70;
+      break;
+    }
+  }
+}
+function mapDown(e, p, now) {
+  MAP.pts.set(e.pointerId, p); MAP.inT = now;
+  if (MAP.dir < 0) return;
+  if (MAP.pts.size === 2) {
+    const [a, b] = [...MAP.pts.values()];
+    MAP.pinch = {d0:Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), m0:[(a.x + b.x) / 2, (a.y + b.y) / 2], z0:MAP.cam.z, x0:MAP.cam.x, y0:MAP.cam.y};
+    MAP.stroke = null; MAP.lab = null; return;
+  }
+  if (MAP.pts.size === 1) MAP.stroke = {id:e.pointerId, x:p.x, y:p.y, t:now, x0:p.x, y0:p.y, t0:now, moved:0};
+}
+function mapMove(e) {
+  if (!MAP.pts.has(e.pointerId)) return;
+  const p = pt(e), now = performance.now(); MAP.pts.set(e.pointerId, p); MAP.inT = now;
+  if (MAP.pinch && MAP.pts.size >= 2) {
+    const [a, b] = [...MAP.pts.values()], pc = MAP.pinch, d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const z = clamp(pc.z0 * d / pc.d0, .45, 3), wx = (pc.m0[0] - pc.x0) / pc.z0, wy = (pc.m0[1] - pc.y0) / pc.z0;
+    MAP.cam.z = z; MAP.cam.x = mx - wx * z; MAP.cam.y = my - wy * z; return;
+  }
+  const s = MAP.stroke; if (!s || s.id !== e.pointerId) return;
+  const dd = Math.hypot(p.x - s.x, p.y - s.y), sp = dd / Math.max(1, now - s.t) * 1000;
+  s.moved = Math.max(s.moved, Math.hypot(p.x - s.x0, p.y - s.y0));
+  if (sp > P.mapCutSpeed && dd > 2) mapCut(s.x, s.y, p.x, p.y, now);
+  s.x = p.x; s.y = p.y; s.t = now;
+}
+function mapUp(e) {
+  const s = MAP.stroke, now = performance.now();
+  if (s && s.id === e.pointerId && e.type === 'pointerup' && MAP.dir > 0) {
+    const p = pt(e), dy = p.y - s.y0;
+    if (s.moved < 12 && now - s.t0 < 400) {
+      let best = null, bd = 1e9;
+      for (const n of MAP.N) { const q = w2s(n.x, n.y), d = Math.hypot(p.x - q[0], p.y - q[1]) - n.r * MAP.cam.z; if (d < bd) { bd = d; best = n; } }
+      if (best && bd < (e.pointerType === 'touch' ? 22 : 12)) { MAP.lab = best; MAP.labT = now; } else MAP.lab = null;
+    } else if (s.y0 > H * .78 && dy < -110 && Math.abs(p.x - s.x0) < -dy * .6) mapExit(now);
+  }
+  if (s && s.id === e.pointerId) MAP.stroke = null;
+  MAP.pts.delete(e.pointerId);
+  if (MAP.pts.size < 2) MAP.pinch = null;
+}
+function mapFrame(now) {
+  const dt = clamp((now - MAP.last) / 1000, 0, 1 / 30); MAP.last = now;
+  MAP.a = clamp(MAP.a + MAP.dir * dt / Math.max(.2, MAP.dir > 0 ? P.mapEnter : P.mapExit), 0, 1);
+  const A = MAP.a, z = MAP.cam.z;
+  if (MAP.dir < 0) { const k = 1 - Math.exp(-dt * 4); MAP.cam.z += (1 - MAP.cam.z) * k; MAP.cam.x *= 1 - k; MAP.cam.y *= 1 - k; }
+  const hf = sm5(A * 2.2);
+  HV.cv.style.opacity = 1 - hf; HV.cv.style.transform = hf > 0 ? `translateY(${hf * 34}px) scale(${1 - .05 * hf})` : '';
+  MAP.el.style.opacity = sm5(A * 3);
+  if (A <= 0 && MAP.dir < 0) { MAP.on = false; MAP.dir = 0; HV.cv.style.opacity = ''; HV.cv.style.transform = ''; MAP.el.style.opacity = 0; MAP.note.classList.remove('on'); return; }
+  mapPhys(dt, false);
+  // lamp: under the finger, drifting slowly over the map when idle
+  const fp = [...MAP.pts.values()][0], idle = now - MAP.inT > 2500;
+  const tg = fp ? [fp.x, fp.y] : idle ? [W / 2 + Math.sin(T * .21) * W * .3, H * .45 + Math.cos(T * .17) * H * .2] : MAP.lp;
+  const lk = 1 - Math.exp(-dt / Math.max(.02, idle && !fp ? 1.5 : P.lightLag)); MAP.lp[0] += (tg[0] - MAP.lp[0]) * lk; MAP.lp[1] += (tg[1] - MAP.lp[1]) * lk;
+  // geometry, screen space
+  const S = MAP.S, R = MAP.R, NB = MAP.NB; let ns = 0, ch = 0;
+  const seg = (ax, ay, bx, by, ra, rb, w) => { if (ns >= 88) return; S.set([ax, ay, bx, by], ns * 4); R.set([ra, rb, w, ch], ns * 4); ns++; };
+  const SP = new Map();
+  MAP.N.forEach((n, i) => {
+    const g = sm5((A - n.d) / .35), q = w2s(n.x, n.y), o = n.o && ORBS.includes(n.o) ? n.o : null;
+    const s0 = o ? orbPos(o) : {x:q[0], y:-30}, r0 = o ? o.r * o.s : 4, br = 1 + .035 * Math.sin(T * TAU / 5 + n.ph);
+    const x = s0.x + (q[0] - s0.x) * g, y = s0.y + (q[1] - s0.y) * g, r = (r0 + (n.r * z * br - r0) * g);
+    SP.set(n, {x, y, r}); if (i < 12) NB.set([x, y, r, .5 + (n.w - .5) * g], i * 4);
+  });
+  // synapse: cone out of each cell, thin axon in between, a slow bend; drawn as intervals [t0,t1] with tapered free tips
+  const now2 = now;
+  for (const l of MAP.L) {
+    const pa = SP.get(l.a), pb = SP.get(l.b), gl = sm5((A - .45 - l.k * .15 / MAP.L.length) / .4);
+    l.poly = [];
+    if (gl <= 0) continue;
+    const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.max(1, Math.hypot(dx, dy)), nx = -dy / d, ny = dx / d;
+    const bend = d * (P.synBend * Math.sin(l.ph) + P.synWave * Math.sin(T * .6 + l.ph * 2)), w0 = P.synW * Math.sqrt(z);
+    const Q = t => { const u = 1 - t, b = 2 * u * t * bend; return [pa.x + dx * t + nx * b, pa.y + dy * t + ny * b]; };
+    const rad = t => w0 + (pa.r * P.synCone - w0) * Math.exp(-t / Math.max(.02, P.synNeck)) + (pb.r * P.synCone - w0) * Math.exp(-(1 - t) / Math.max(.02, P.synNeck));
+    const wt = t => l.a.w + (l.b.w - l.a.w) * t;
+    const run = (t0, t1, tipA, tipB) => {
+      if (t1 - t0 < .005 || ns >= 88) return;
+      const k = 3;
+      for (let j = 0; j < k; j++) {
+        const u0 = t0 + (t1 - t0) * j / k, u1 = t0 + (t1 - t0) * (j + 1) / k, a = Q(u0), b = Q(u1);
+        const ra = rad(u0) * (j === 0 ? tipA : 1), rb = rad(u1) * (j === k - 1 ? tipB : 1);
+        seg(a[0], a[1], b[0], b[1], Math.max(.6, ra), Math.max(.6, rb), wt((u0 + u1) / 2));
+        if (j === 0) l.poly.push([a[0], a[1], u0]); l.poly.push([b[0], b[1], u1]);
+      }
+      ch++;
+    };
+    let gA = gl, gB = gl, tf = .6 + .4 * gl, joined = gl >= 1;
+    if (l.st === 'cut') {
+      const e = sm5((now2 - l.tc) / (Math.max(.1, P.synRetract) * 1000)), stub = P.synNeck * .9;
+      const reg = P.synRegrow > 0 ? sm5((now2 - l.tc - P.synRegrow * 1000) / 1600) : 0;
+      if (reg >= 1) { l.st = 'ok'; }
+      else {
+        const ta = Math.max(stub, l.u * (1 - e) + stub * e), tb = Math.min(1 - stub, l.u + (1 - stub - l.u) * e);
+        const fa = ta + (.5 - ta) * reg, fb = tb + (.5 - tb) * reg, tt = reg > 0 ? .6 + .4 * reg : 1 - .4 * sm5(e * 3);
+        run(0, fa, 1, tt); run(fb, 1, tt, 1); continue;
+      }
+    }
+    if (joined) run(0, 1, 1, 1); else { run(0, .5 * gA, 1, tf); run(1 - .5 * gB, 1, tf, 1); }
+  }
+  // dendrites: short feelers, two tapering segments that curl slowly
+  MAP.N.forEach((n, i) => {
+    const pn = SP.get(n), gd = sm5((A - .32 - n.d) / .4);
+    if (gd <= 0) return;
+    for (const f of n.den) {
+      if (ns >= 87) return;
+      const an = f.a + P.dendWiggle * Math.sin(T * .3 + f.ph), L = pn.r * P.dendLen * f.l * gd, b = f.b + .25 * Math.sin(T * .23 + f.ph * 1.7);
+      const x0 = pn.x + Math.cos(an) * pn.r * .55, y0 = pn.y + Math.sin(an) * pn.r * .55;
+      const x1 = x0 + Math.cos(an + b * .5) * L * .55, y1 = y0 + Math.sin(an + b * .5) * L * .55;
+      const x2 = x1 + Math.cos(an + b * 1.3) * L * .45, y2 = y1 + Math.sin(an + b * 1.3) * L * .45, r0 = pn.r * P.dendW;
+      seg(x0, y0, x1, y1, r0, Math.max(1, r0 * .5), n.w); seg(x1, y1, x2, y2, Math.max(1, r0 * .5), .9, n.w); ch++;
+    }
+  });
+  MAP.ns = ns;
+  // label
+  const lb = MAP.lab && now - MAP.labT < 2500 && MAP.dir > 0 ? MAP.lab : null;
+  if (lb) { const q = SP.get(lb); MAP.note.style.transform = `translate(${q.x}px,${q.y - q.r - P.labelGap}px) translate(-50%,-100%)`; if (MAP.note.textContent !== lb.text) MAP.note.textContent = lb.text; }
+  MAP.note.classList.toggle('on', !!lb);
+  const v = MAP.v, g = v && v.g; if (!g) return;
+  const L = v.L;
+  g.viewport(0, 0, MAP.el.width, MAP.el.height);
+  g.uniform2f(L.uRes, MAP.el.width, MAP.el.height); g.uniform1f(L.uDpr, MAP.dpr); g.uniform2f(L.uLP, MAP.lp[0], MAP.lp[1]);
+  g.uniform1f(L.uRim, .45 * P.rimGain); g.uniform1f(L.uGR, 18); g.uniform1f(L.uK, Math.max(.5, P.mapSharp)); g.uniform1f(L.uMW, Math.max(.5, P.rimMinPx)); g.uniform1f(L.uLG, P.lightGain); g.uniform1f(L.uLH, P.lampH);
+  g.uniform1f(L.uNN, Math.min(12, MAP.N.length)); g.uniform1f(L.uNS, ns);
+  g.uniform4fv(L.uN, NB); g.uniform4fv(L.uS, S); g.uniform4fv(L.uR, R);
+  g.drawArrays(g.TRIANGLES, 0, 3);
 }
 requestAnimationFrame(frame);
 </script>

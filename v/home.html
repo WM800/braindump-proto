@@ -52,7 +52,7 @@ const P0 = {
   // droplets off by default (drops:1 re-enables splash/tear)
   drops:0, splashTh:.6, splashRate:32, maxDrops:14, splashSpeedMin:150, splashSpeedMax:280, splashSpread:60, dropMin:1.2, dropMax:3, dropLost:.4, dropReturn:45, splashDelay:.3, splashFric:3, mergeR:.6, volumeLoss:.3, dropLight:.35,
   // finger in thick water: gentle when slow, strong (can split the core) when fast
-  fingerR:70, cutR:38, cutIn:5, cutOut:1.2, scarLife:1.4, scarSpeed:1.5, fastFlee:.25, orbCutSpeed:500, orbSplit:7, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
+  fingerR:70, cutR:38, cutIn:5, cutOut:1.2, scarLife:1.4, scarSpeed:1, fastFlee:.25, orbCutSpeed:500, orbSplit:7, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
@@ -418,7 +418,11 @@ function frame(now) {
   const recLike = rec || now < shoutEnd, hold = rec;
   const fing = !!(swipe && pts.has(swipe.id));
   cutS += ((fing ? 1 : 0) - cutS) * Math.min(1, dt * (fing ? P.cutIn : P.cutOut));
-  if (fing) { const sp = clamp(psp / P.fingerFast, 0, 2); SCAR.push({x:PX, y:PY, t:now, id:swipe, w:P.cutR * P.scarSpeed * sp}); }
+  if (fing) {
+    const lp = SCAR[SCAR.length - 1], same = lp && lp.id === swipe, mv = same ? Math.hypot(PX - lp.x, PY - lp.y) : 0;
+    const v = same && mv > 0 ? mv / Math.max((now - lp.t) / 1000, 1e-3) : 0, sp = clamp(Math.max(v, psp) / P.fingerFast, 0, 2);
+    if (!same || mv > 2 || now - lp.t > 50) SCAR.push({x:PX, y:PY, t:now, id:swipe, w:P.cutR * (.7 + P.scarSpeed * sp)});
+  }
   while (SCAR.length && (now - SCAR[0].t > P.scarLife * 1000 || SCAR.length > 120)) SCAR.shift();
   const SG = scarSegs(now), fastK = 1 - (1 - P.fastFlee) * clamp(psp / P.fingerFast, 0, 1);
 

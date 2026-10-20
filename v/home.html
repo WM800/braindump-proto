@@ -11,14 +11,14 @@ html,body{height:100%;background:#000;color:#8A8A8A;font-family:Inter,system-ui,
 body{display:flex;align-items:center;justify-content:center}
 .phone{position:relative;width:390px;height:844px;background:#000;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
 @media (max-width:500px){.phone{width:100vw;height:100vh;height:100dvh}}
-#map{opacity:0}
+#mback{position:absolute;left:0;right:0;bottom:22px;text-align:center;font-size:11px;letter-spacing:.06em;color:#555;opacity:0;pointer-events:none}
 #mnote{position:absolute;left:0;top:0;max-width:200px;font:13px/1.35 system-ui,"Segoe UI",sans-serif;text-align:center;color:rgba(255,255,255,.7);text-shadow:0 0 14px #000;pointer-events:none;opacity:0;transition:opacity .22s}
 #mnote.on{opacity:1}
 #mlab{position:absolute;inset:0;pointer-events:none;opacity:0}
 #mlab div{position:absolute;left:0;top:0;white-space:nowrap;pointer-events:none;text-shadow:0 0 10px #000}
 #mlab .g{font-size:15px;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.5)}
 #mlab .n{font-size:11px;color:rgba(255,255,255,.8);opacity:0}
-#mhint{position:absolute;left:0;right:0;bottom:28px;text-align:center;font-size:11px;color:#333;opacity:0;transition:opacity 1s;pointer-events:none}
+#mhint{position:absolute;left:0;right:0;bottom:52px;text-align:center;font-size:11px;color:#333;opacity:0;transition:opacity 1s;pointer-events:none}
 #mhint.on{opacity:1}
 canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-action:none}
 #msg{position:absolute;left:0;right:0;top:60%;text-align:center;font-size:13px;letter-spacing:.02em;color:#8A8A8A;opacity:0;transition:opacity .4s;pointer-events:none}
@@ -40,10 +40,10 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 <body>
 <div class="phone" id="phone">
   <canvas id="gl"></canvas>
-  <canvas id="map"></canvas>
   <div id="mlab"></div>
+  <div id="mback">↑ home</div>
   <div id="mnote"></div>
-  <div id="mhint">two fingers to move and zoom · double-tap or shake to reset · swipe up from the bottom to go back</div>
+  <div id="mhint">two fingers to move and zoom · double-tap or shake to reset</div>
   <div id="hint">double-tap to hide thoughts</div>
   <div id="msg"></div>
   <div id="mic">mic off</div>
@@ -75,14 +75,14 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapDpr:1.5, mapSharp:1, mapReach:7, mapNodeR:1, mapRim:13, synCone:.45, synNeck:.2, synBend:.08, synWave:.04, synIn:1, synOut:.45, synLen:44, synK:4, synCross:.12, mapRepel:4000, mapGroupK:.15, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.3, mapExit:1.2, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:2.2, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.3, mapExit:1.2, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v30')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v31')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
 uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
-uniform vec4 uM[48];uniform float uPin[24];uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
+uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
@@ -116,7 +116,8 @@ void main(){
   float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn*(.4+.6*att);
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
   float f2=0.,w2=0.,pw=0.;vec2 G2=vec2(0.);
-  for(int i=0;i<48;i++){if(float(i)>=uNM)break;vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
+  for(int i=0;i<56;i++){if(float(i)>=uNM)break;vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
+  for(int i=0;i<40;i++){if(float(i)>=uNS)break;vec4 s=uS[i];vec4 rq=uSR[i/2];vec2 rw=(i-(i/2)*2)==0?rq.xy:rq.zw;vec2 ab=s.zw-s.xy;float t=clamp(dot(p-s.xy,ab)/max(dot(ab,ab),1e-4),0.,1.);vec2 dv=p-s.xy-ab*t;float d2=max(dot(dv,dv),1.);float c2=rw.x*rw.x/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*rw.y;}
   float bw=f2>0.?w2/f2:0.;
   float gn2=max(length(G2),1e-4);
   float m2=smoothstep(-.7,.7,(f2-1.)/gn2); // 1px antialiased edge, like the core
@@ -172,7 +173,7 @@ const ORBS = TEXTS.map(t => mkOrb(t));
 
 function makeView() {
   const cv = document.getElementById('gl'), g = cv.getContext('webgl', {alpha:false, antialias:false});
-  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(192), PN:new Float32Array(24), GL:new Float32Array(16), AU:new Float32Array([0, 0, 1, 0]), WU:new Float32Array(24)};
+  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(224), PN:new Float32Array(28), S:new Float32Array(160), SR:new Float32Array(80), NS:0, GL:new Float32Array(16), AU:new Float32Array([0, 0, 1, 0]), WU:new Float32Array(24)};
   if (!g) return v;
   const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); if (!g.getShaderParameter(o, g.COMPILE_STATUS)) console.error(g.getShaderInfoLog(o)); return o; };
   const pr = g.createProgram();
@@ -181,7 +182,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -275,7 +276,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v30', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v31', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30, dendN:5};
 const META = Object.keys(P0).map(k => {
@@ -376,7 +377,7 @@ function draw() {
   g.uniform1f(L.uRim, rimS * P.rimGain); g.uniform1f(L.uGR, grS);
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uEB, Math.max(1.05, P.rimBand)); g.uniform1f(L.uOB, Math.max(1.05, P.orbBand)); g.uniform1f(L.uMW, Math.max(.5, P.rimMinPx)); g.uniform1f(L.uLG, P.lightGain); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
-  g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN);
+  g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
   g.drawArrays(g.TRIANGLES, 0, 3);
 }
@@ -563,7 +564,7 @@ function cutLink(a, b) {
 }
 
 function frame(now) {
-  if (MAP.on && MAP.a >= 1) { last = now; mapFrame(now); requestAnimationFrame(frame); return; }
+  if (MAP.on && MAP.a >= 1) { T += clamp((now - last) / 1000, 0, 1 / 30); last = now; mapFrame(now); draw(); requestAnimationFrame(frame); return; }
   const dt = clamp((now - last) / 1000, 0, 1 / 30); last = now; T += dt;
   spring(sc, dt);
   br = .5 - .5 * Math.cos(T * TAU / 5);
@@ -901,11 +902,11 @@ function frame(now) {
     const q = orbPos(o), rr = o.r * o.s * (1 - (o.bf || 0)), ef = clamp((q.y + o.r) / (P.edgeFade * H), 0, 1), cl = o.detT ? 1 - clamp((now - o.detT) / (P.birthDim * 1000), 0, 1) : 0, kI = P.orbLevel * o.rs * o.dim + (1 - P.orbLevel * o.rs * o.dim) * cl * cl * (3 - 2 * cl), w = (kI * vis + (o.pinned ? P.pinRim : 0)) * ef * ef * (3 - 2 * ef) * (1 - (o.bf || 0)), sh = 40 * (1 - vis);
     const sm = Math.min(1, Math.hypot(o.cx2, o.cy2) / Math.max(1, o.r)), ra = 1 - .25 * sm;
     M.set([q.x + o.cx2, q.y + o.cy2, rr * ra, w], k * 8); M.set([o.qx - o.cx2 * (1 - .5 * (1 - sm)), o.qy + sh - o.cy2 * (1 - .5 * (1 - sm)), rr * (.8 + .2 * sm) * ra, w], k * 8 + 4);
-    PN[k] = o.pinned ? P.pinInner : 0;
+    PN[k] = o.pinned ? P.pinInner : 0; o.mk = k; o.mkT = now;
     if (o.pinned && gk < 4) { GL.set([q.x, q.y, P.auraScale * o.r, P.glowI * vis], gk * 4); gk++; }
     k++;
   }
-  HV.NM = MAP.on ? 0 : k * 2;
+  HV.NM = k * 2;
   // pin aura: exponential, brightest at the orb, a faint wide tail; fades over auraDur
   if (AUR && ORBS.includes(AUR.o) && now - AUR.t0 < P.auraDur * 1000) {
     const u = (now - AUR.t0) / (P.auraDur * 1000), q = orbPos(AUR.o);
@@ -922,13 +923,12 @@ function frame(now) {
   }
   NOTE.classList.toggle('on', !!showing);
 
-  draw();
   if (MAP.on) mapFrame(now);
+  draw();
   requestAnimationFrame(frame);
 }
-// ===== THOUGHT MAP (pull down from the top): thoughts = cells, synapses = tubes in the SAME field + shading as the core.
-// Two passes so it scales to hundreds of elements: every cell / tube splats its field (f, grad f, light weight) additively
-// into a half-float texture, then one full-screen pass shades it exactly like the home blob (dark body, px rim, lamp, spec).
+// ===== THOUGHT MAP (pull down from the top): the SAME thought orbs, drawn by the SAME shader as home. Synapses are thin
+// capsules added to the thoughts' own field, so a link meets a cell exactly the way two orbs melt together on home.
 // Thickness = link strength, brightness = inside a group vs between groups, groups lie together as clusters.
 const MAP_GROUPS = [
   ['Family', ['Call mom back', "Grandpa's boat story", "Sister's birthday gift", 'Plan Sunday dinner', 'Photos from the lake', 'Ask dad about the car', "Kids' school forms", 'Aunt Ela visit', 'Family trip in May']],
@@ -937,70 +937,19 @@ const MAP_GROUPS = [
   ['Errands', ['Oat milk run', 'Return the jacket', 'Post office parcel', 'Car insurance renewal', 'Buy batteries', 'Pharmacy pickup', 'Pay electricity bill', 'Dry cleaning']],
   ['Ideas', ['Light as a material', 'Sketch the drop', 'App that listens to thoughts', 'Story: the lighthouse', 'Rain sound as UI', 'Map of feelings', 'Blob as interface', 'Photo series: shadows', 'Font from handwriting']],
   ['Work', ['Send Q3 report', 'Prepare client deck', 'Reply to Marta', 'Team retro notes', 'Update the roadmap', 'Interview on Thursday', 'Budget for tools', 'Refactor onboarding', '1:1 with Tom']]];
-const MSVS = `attribute vec2 aP;attribute vec4 aS;attribute vec4 aR;uniform vec2 uRes;varying vec2 vP;varying vec4 vS;varying vec4 vR;
-void main(){vP=aP;vS=aS;vR=aR;gl_Position=vec4(aP.x/uRes.x*2.-1.,1.-aP.y/uRes.y*2.,0.,1.);}`;
-const MSFS = `precision highp float;uniform float uK;varying vec2 vP;varying vec4 vS;varying vec4 vR;
-void main(){vec2 ab=vS.zw-vS.xy;float t=clamp(dot(vP-vS.xy,ab)/max(dot(ab,ab),1e-4),0.,1.);vec2 dv=vP-vS.xy-ab*t;float d2=max(dot(dv,dv),.25);
-  float rr=mix(vR.x,vR.y,t),R2=vR.w*vR.w;if(d2>=R2)discard;float wn=1.-d2/R2;wn*=wn;
-  float b=rr*rr/d2,q=pow(min(b,40.),uK)*wn;gl_FragColor=vec4(q,b<40.?-2.*uK*q*dv/(d2+rr*rr*.25):vec2(0.),q*vR.z);}`;
-const MCFS = `precision highp float;uniform sampler2D uT;uniform vec2 uRes,uLP;uniform float uDpr,uRim,uGR,uMW,uLG,uLH;
-void main(){vec4 F=texture2D(uT,gl_FragCoord.xy/uRes);vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
-  float f=F.x;vec2 G=F.yz;float lwn=f>1e-5?F.w/f:0.;
-  float gn=max(length(G),1e-4);float sd=(f-1.)/gn;float m=smoothstep(-.7,.7,sd);float og=exp(-max(-sd,0.)/uGR);
-  float edge=1.-smoothstep(0.,uMW,log(max(f,1e-4))*f/gn);
-  vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
-  vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));
-  vec3 Lv=normalize(vec3(ld*.6,.8)),Hv=normalize(Lv+vec3(0.,0.,1.));
-  float side=max(dot(N.xy,ld),0.);
-  float rim=edge*edge*uRim*(.6+uLG*side*side*att)*lwn;
-  float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn*(.4+.6*att);
-  float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
-  gl_FragColor=vec4(vec3(c),1.);}`;
 const MAP = {on:false, a:0, dir:0, last:0, N:[], L:[], cam:{z:1, x:0, y:0}, ct:null, vel:[0, 0], pts:new Map(), pinch:null, pan:null, lab:null, labT:-1e9, lp:[0, 0], inT:-1e9, tapT:-1e9,
-  el:$('#map'), note:$('#mnote'), hint:$('#mhint'), lay:$('#mlab'), v:null, vb:new Float32Array(0), shakeT:-1e9, motion:false};
+  note:$('#mnote'), hint:$('#mhint'), lay:$('#mlab'), back:$('#mback'), shakeT:-1e9, motion:false, hm:-1, order:[]};
 const sm5 = x => { x = clamp(x, 0, 1); return x * x * x * (x * (x * 6 - 15) + 10); };
-function mapView() {
-  const cv = MAP.el; let g = cv.getContext('webgl2', {alpha:false, antialias:false}), v = {g, L:{}, C:{}};
-  let ht = null;
-  if (g) { if (!g.getExtension('EXT_color_buffer_float') && !g.getExtension('EXT_color_buffer_half_float')) g = null; else ht = {fmt:g.RGBA16F, type:g.HALF_FLOAT}; }
-  if (!g) { g = cv.getContext('webgl', {alpha:false, antialias:false}); const e = g && g.getExtension('OES_texture_half_float'); if (g && e) { g.getExtension('EXT_color_buffer_half_float'); ht = {fmt:g.RGBA, type:e.HALF_FLOAT_OES}; } }
-  v.g = g; v.ht = ht; if (!g || !ht) { console.error('map: no half-float render target'); return v; }
-  const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); if (!g.getShaderParameter(o, g.COMPILE_STATUS)) console.error(g.getShaderInfoLog(o)); return o; };
-  const prog = (vs, fs) => { const p = g.createProgram(); g.attachShader(p, sh(g.VERTEX_SHADER, vs)); g.attachShader(p, sh(g.FRAGMENT_SHADER, fs)); g.linkProgram(p); return p; };
-  v.ps = prog(MSVS, MSFS); v.pc = prog(VS, MCFS);
-  ['uRes','uK'].forEach(n => v.L[n] = g.getUniformLocation(v.ps, n));
-  ['aP','aS','aR'].forEach(n => v.L[n] = g.getAttribLocation(v.ps, n));
-  ['uT','uRes','uLP','uDpr','uRim','uGR','uMW','uLG','uLH'].forEach(n => v.C[n] = g.getUniformLocation(v.pc, n));
-  v.C.a = g.getAttribLocation(v.pc, 'a');
-  v.bq = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, v.bq); g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
-  v.bs = g.createBuffer();
-  v.tex = g.createTexture(); v.fb = g.createFramebuffer();
-  return v;
-}
-function mapSize() {
-  const d = Math.min(DPR, Math.max(.5, P.mapDpr)), v = MAP.v;
-  MAP.dpr = d; MAP.el.width = Math.round(W * d); MAP.el.height = Math.round(H * d); MAP.el.style.width = W + 'px'; MAP.el.style.height = H + 'px';
-  if (!v || !v.ht) return;
-  const g = v.g;
-  g.bindTexture(g.TEXTURE_2D, v.tex);
-  g.texImage2D(g.TEXTURE_2D, 0, v.ht.fmt, MAP.el.width, MAP.el.height, 0, g.RGBA, v.ht.type, null);
-  [g.TEXTURE_MIN_FILTER, g.TEXTURE_MAG_FILTER].forEach(k => g.texParameteri(g.TEXTURE_2D, k, g.NEAREST));
-  [g.TEXTURE_WRAP_S, g.TEXTURE_WRAP_T].forEach(k => g.texParameteri(g.TEXTURE_2D, k, g.CLAMP_TO_EDGE));
-  g.bindFramebuffer(g.FRAMEBUFFER, v.fb); g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, v.tex, 0);
-  if (g.checkFramebufferStatus(g.FRAMEBUFFER) !== g.FRAMEBUFFER_COMPLETE) console.error('map: framebuffer incomplete');
-  g.bindFramebuffer(g.FRAMEBUFFER, null);
-}
-window.addEventListener('resize', () => { if (MAP.on) mapSize(); });
 const w2s = (x, y) => [x * MAP.cam.z + MAP.cam.x, y * MAP.cam.z + MAP.cam.y];
 function mapBuild() {
   const N = [], groups = [];
   MAP_GROUPS.forEach(([name, items], gi) => {
     const ga = gi * TAU / MAP_GROUPS.length + .3, gx = Math.cos(ga) * 150, gy = Math.sin(ga) * 150;
     groups.push({name, gi, x:gx, y:gy, el:null});
-    items.forEach((text, k) => {
+    items.slice(0, 7).forEach((text, k) => {
       const o = ORBS.find(q => q.text === text && q.state === 'ok') || null, id = N.length;
       N.push({text, gi, o, x:gx + hsh(id * 3.3) * 60, y:gy + hsh(id * 7.1) * 60, vx:0, vy:0, ph:hsh(id * 4.7) * TAU,
-        r:(o && o.pinned ? 16 : 9 + 6 * Math.abs(hsh(id * 1.9))) * P.mapNodeR, w:o ? 1 : .8, lab:null});
+        r:(o && o.pinned ? 13 : 7 + 5 * Math.abs(hsh(id * 1.9))) * P.mapNodeR, w:o ? 1.25 : .7 + .5 * Math.abs(hsh(id * 6.1)), lab:null});
     });
   });
   for (const o of ORBS) if (o.state === 'ok' && !N.some(n => n.o === o)) { const id = N.length; N.push({text:o.text, gi:id % groups.length, o, x:0, y:0, vx:0, vy:0, ph:hsh(id) * TAU, r:(o.pinned ? 14 : 10) * P.mapNodeR, w:1, lab:null}); }
@@ -1012,15 +961,16 @@ function mapBuild() {
     const M = N.filter(n => n.gi === G.gi), inT = new Set([M[0]]);
     while (inT.size < M.length) { let b = null; for (const x of inT) for (const y of M) if (!inT.has(y) && (!b || dd(x, y) < dd(b[0], b[1]))) b = [x, y]; L.push({a:b[0], b:b[1], s:.45 + .55 * Math.abs(hsh(L.length * 2.3)), x:false}); inT.add(b[1]); }
     const ex = []; for (let i = 0; i < M.length; i++) for (let j = i + 1; j < M.length; j++) if (!has(M[i], M[j])) ex.push([M[i], M[j]]);
-    ex.sort((p, q) => dd(p[0], p[1]) - dd(q[0], q[1])).slice(0, Math.round(M.length * .35)).forEach(([a, b]) => L.push({a, b, s:.2 + .4 * Math.abs(hsh(L.length * 5.1)), x:false}));
+    ex.sort((p, q) => dd(p[0], p[1]) - dd(q[0], q[1])).slice(0, 0).forEach(([a, b]) => L.push({a, b, s:.2 + .4 * Math.abs(hsh(L.length * 5.1)), x:false}));
   });
-  for (let k = 0; k < groups.length + 3; k++) {
+  for (let k = 0; k < groups.length - 2; k++) {
     const g1 = groups[k % groups.length], g2 = groups[(k + 1 + (k >= groups.length ? 1 : 0)) % groups.length];
     let b = null; for (const x of N) if (x.gi === g1.gi) for (const y of N) if (y.gi === g2.gi && (!b || dd(x, y) < dd(b[0], b[1]))) b = [x, y];
     if (b && !has(b[0], b[1])) L.push({a:b[0], b:b[1], s:.15 + .2 * Math.abs(hsh(k * 8.7)), x:true});
   }
   L.forEach((l, k) => Object.assign(l, {k, ph:hsh(k * 2.9) * TAU, st:'ok', u:.5, tc:0, poly:[]}));
   MAP.L = L;
+  MAP.order = N.filter(n => n.o).sort((p, q) => (q.o.pinned ? 1 : 0) - (p.o.pinned ? 1 : 0)).concat(N.filter(n => !n.o));
   for (let s = 0; s < 300; s++) mapPhys(1 / 60, true);
   // group labels
   MAP.lay.innerHTML = '';
@@ -1035,8 +985,7 @@ function mapFit() {
 }
 function mapEnter(now, manual) {
   if (MAP.on) { MAP.dir = manual ? 0 : 1; return; }
-  if (!MAP.v) MAP.v = mapView();
-  mapSize(); mapBuild(); MAP.cam = mapFit(); MAP.ct = null; MAP.vel = [0, 0];
+  mapBuild(); MAP.cam = mapFit(); MAP.ct = null; MAP.vel = [0, 0];
   MAP.on = true; MAP.dir = manual ? 0 : 1; MAP.a = 0; MAP.stroke = null; MAP.last = now; MAP.lp = [W / 2, H * .45]; MAP.lab = null; MAP.pts.clear(); MAP.pinch = null; MAP.pan = null;
   drag = null; swipe = null; grabP = null; pts.clear(); NOTE.classList.remove('on');
   MAP.hint.classList.add('on'); setTimeout(() => MAP.hint.classList.remove('on'), 3200);
@@ -1122,9 +1071,10 @@ function mapUp(e) {
     if (s.moved < 10 && now - s.t0 < 350) {
       let best = null, bd = 1e9;
       for (const n of MAP.N) { const q = w2s(n.x, n.y), d = Math.hypot(p.x - q[0], p.y - q[1]) - n.r * MAP.cam.z; if (d < bd) { bd = d; best = n; } }
-      if (best && bd < (e.pointerType === 'touch' ? 20 : 10)) { MAP.lab = best; MAP.labT = now; MAP.tapT = -1e9; }
+      if (p.y > H - 64 && Math.abs(p.x - W / 2) < 70) { mapExit(now); best = null; }
+      else if (best && bd < (e.pointerType === 'touch' ? 20 : 10)) { MAP.lab = best; MAP.labT = now; MAP.tapT = -1e9; }
       else { MAP.lab = null; if (now - MAP.tapT < 320) { MAP.ct = mapFit(); MAP.tapT = -1e9; } else MAP.tapT = now; }
-    } else if (s.y0 > H * .86 && p.y - s.y0 < -100 && Math.abs(p.x - s.x0) < s.y0 - p.y) mapExit(now);
+    } else if (s.y0 > H * .7 && p.y - s.y0 < -110 && Math.abs(p.x - s.x0) < s.y0 - p.y) mapExit(now);
   }
   if (s && s.id === e.pointerId) MAP.stroke = null;
   if (MAP.pan && MAP.pan.id === e.pointerId) { if (now - MAP.pan.t > 80) MAP.vel = [0, 0]; MAP.pan = null; }
@@ -1155,52 +1105,71 @@ function mapCut(x0, y0, x1, y1, now) {
 function mapFrame(now) {
   const dt = clamp((now - MAP.last) / 1000, 0, 1 / 30); MAP.last = now;
   if (MAP.dir) MAP.a = clamp(MAP.a + MAP.dir * dt / Math.max(.2, MAP.dir > 0 ? P.mapEnter : P.mapExit), 0, 1);
-  const A = MAP.a, cam = MAP.cam;
+  const A = MAP.a, cam = MAP.cam; MAP.hm = now;
   if (!MAP.pan && !MAP.pinch) { cam.x += MAP.vel[0] * dt; cam.y += MAP.vel[1] * dt; const k = Math.exp(-P.mapPanFric * dt); MAP.vel[0] *= k; MAP.vel[1] *= k; }
   if (MAP.ct) { const k = 1 - Math.exp(-dt * 5); cam.z += (MAP.ct.z - cam.z) * k; cam.x += (MAP.ct.x - cam.x) * k; cam.y += (MAP.ct.y - cam.y) * k; if (Math.abs(MAP.ct.z - cam.z) < .002) MAP.ct = null; }
-  // the home screen scrolls down and away (the core leaves with it); the thoughts stay and walk to their places in the map
+  // the home screen scrolls down and away (the core leaves with it); the same thought orbs stay and walk to their places
   const hs = sm5(A);
-  HV.cv.style.opacity = 1 - sm5(A * 1.6); HV.cv.style.transform = A > 0 ? `translateY(${hs * H * .6}px)` : '';
-  MAP.el.style.opacity = 1; MAP.lay.style.opacity = sm5((A - .7) / .3);
-  if (A <= 0 && MAP.dir < 0) { MAP.on = false; MAP.dir = 0; HV.cv.style.opacity = ''; HV.cv.style.transform = ''; MAP.el.style.opacity = 0; MAP.note.classList.remove('on'); MAP.lay.innerHTML = ''; return; }
+  MAP.lay.style.opacity = sm5((A - .7) / .3); MAP.back.style.opacity = MAP.dir >= 0 ? sm5((A - .8) / .2) : 0;
+  if (A <= 0 && MAP.dir < 0) { MAP.on = false; MAP.dir = 0; HV.NS = 0; MAP.lay.innerHTML = ''; MAP.back.style.opacity = 0; return; }
   mapPhys(dt, false);
   const fp = [...MAP.pts.values()][0], hov = now - (MAP.hvT || -1e9) < 2500, idle = !fp && !hov;
   const tg = fp ? [fp.x, fp.y] : hov ? [MAP.hv.x, MAP.hv.y] : [W / 2 + Math.sin(T * .21) * W * .3, H * .45 + Math.cos(T * .17) * H * .2];
   const lk = 1 - Math.exp(-dt / Math.max(.02, idle ? 1.5 : P.lightLag)); MAP.lp[0] += (tg[0] - MAP.lp[0]) * lk; MAP.lp[1] += (tg[1] - MAP.lp[1]) * lk;
-  // elements in screen px: [ax,ay,bx,by] [ra,rb,w,R]
-  const z = cam.z, E = [], cut = Math.max(2, P.mapReach);
-  const SP = new Map(), maxR = Math.hypot(W, H), slide = (1 - hs) * H * .55;
-  for (const n of MAP.N) {
-    const q = w2s(n.x, n.y), o = n.o && ORBS.includes(n.o) ? n.o : null, br = 1 + .03 * Math.sin(T * TAU / 5 + n.ph);
-    let x, y, r, w, g;
-    if (o) { const s0 = orbPos(o), r0 = o.r * o.s; g = sm5((A - .05) / .7); x = s0.x + (q[0] - s0.x) * g; y = s0.y + (q[1] - s0.y) * g; r = r0 + (n.r * z * br - r0) * g; w = .5 + (n.w - .5) * g; }
-    else { const dc = Math.min(1, Math.hypot(q[0] - W / 2, q[1] - H / 2) / maxR); g = sm5((A - .25 - dc * .3) / .45); x = q[0]; y = q[1] - slide; r = n.r * z * br * g; w = n.w; }
+  LP[0] = MAP.lp[0]; LP[1] = MAP.lp[1];
+  // core: scrolls down off the screen with home; pins' glow, aura and waves belong to home
+  if (A >= 1) HV.NB = 0; else for (let k = 0; k < HV.NB; k++) HV.B[k * 4 + 1] += hs * H * .9;
+  HV.GL.fill(0); for (let i = 2; i < 16; i += 4) HV.GL[i] = 1; HV.AU[3] = 0; HV.WU.fill(0);
+  // cells = the home thought orbs, written into the same uniform (head + tail ball, pin flag per pair); orbs and pinned first
+  const HM = HV.M.slice(), M = HV.M, PN = HV.PN; M.fill(0); PN.fill(0);
+  const z = cam.z, SP = new Map(), maxR = Math.hypot(W, H), slide = (1 - hs) * H * .55, CAP = 56;
+  let k = 0;
+  for (const n of MAP.order) {
+    const q = w2s(n.x, n.y), o = n.o && ORBS.includes(n.o) ? n.o : null, br = 1 + .03 * Math.sin(T * TAU / 5 + n.ph), wN = P.orbLevel * n.w;
+    let x, y, r, g;
+    if (o) {
+      g = sm5((A - .05) / .7); const r1 = n.r * z * br; x = q[0]; y = q[1]; r = r1 * 1.28;
+      const h = o.mkT === MAP.hm && o.mk >= 0 ? HM.subarray(o.mk * 8, o.mk * 8 + 8) : [x, y, 0, 0, x, y, 0, 0];
+      const vis2 = x > -r * 4 && x < W + r * 4 && y > -r * 4 && y < H + r * 4;
+      if (k + 2 <= CAP && (vis2 || g < 1)) {
+        M.set([h[0] + (x - h[0]) * g, h[1] + (y - h[1]) * g, h[2] + (r1 - h[2]) * g, h[3] + (wN - h[3]) * g,
+               h[4] + (x + clamp(-n.vx * .05, -4, 4) * z - h[4]) * g, h[5] + (y + clamp(-n.vy * .05, -4, 4) * z - h[5]) * g, h[6] + (r1 * .8 - h[6]) * g, h[7] + (wN - h[7]) * g], k * 4);
+        PN[k >> 1] = o.pinned ? P.pinInner : 0; k += 2;
+      }
+      x = h[0] + (x - h[0]) * g; y = h[1] + (y - h[1]) * g; r = (h[2] * 1.28) + (r - h[2] * 1.28) * g;
+    } else {
+      const dc = Math.min(1, Math.hypot(q[0] - W / 2, q[1] - H / 2) / maxR); g = sm5((A - .25 - dc * .3) / .45);
+      x = q[0]; y = q[1] - slide; r = n.r * z * br * 1.28 * g;
+      if (k < CAP && r > .3 && x > -r * 4 && x < W + r * 4 && y > -r * 4 && y < H + r * 4) { M.set([x, y, r, wN], k * 4); k++; }
+    }
     SP.set(n, {x, y, r, g});
-    if (r > .3) E.push(x, y, x, y, r, r, w, r * cut);
   }
-  // synapse = a soft metaball bridge: wide where it leaves each cell, a thin neck in the middle, slowly bending
+  HV.NM = k;
+  // synapses = thin capsules in the thoughts' own field: where they meet a cell the field bridges it like two orbs touching
+  const S = HV.S, SR = HV.SR; S.fill(0); SR.fill(0); let ns = 0;
+  const seg = (ax, ay, bx, by, r, w) => {
+    if (ns >= 40 || Math.max(ax, bx) < -r * 4 || Math.min(ax, bx) > W + r * 4 || Math.max(ay, by) < -r * 4 || Math.min(ay, by) > H + r * 4) return;
+    S.set([ax, ay, bx, by], ns * 4); SR.set([r, w], ns * 2); ns++;
+  };
   for (const l of MAP.L) {
     const pa = SP.get(l.a), pb = SP.get(l.b), gl = sm5((A - .55 - l.k / MAP.L.length * .15) / .3) * (Math.min(pa.g, pb.g) > .6 ? 1 : 0);
     l.poly = [];
     if (gl <= 0) continue;
-    const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.max(1, Math.hypot(dx, dy)), bend = d * (P.synBend * Math.sin(l.ph) + P.synWave * Math.sin(T * .5 + l.ph * 2));
-    const mx = (pa.x + pb.x) / 2 - dy / d * bend, my = (pa.y + pb.y) / 2 + dx / d * bend, rm = Math.min(pa.r, pb.r);
-    // the bridge starts just under each cell's skin (not at its centre), so the cell body stays clean
-    const ea = Math.min(.45, pa.r * .6 / d), eb = 1 - Math.min(.45, pb.r * .6 / d);
-    const rE = rm * P.synCone, rN = Math.max(.8, rm * P.synNeck * (.5 + .8 * l.s)), w = l.x ? P.synOut : P.synIn;
-    const pos = s => s <= .5 ? [pa.x + (mx - pa.x) * 2 * s, pa.y + (my - pa.y) * 2 * s] : [mx + (pb.x - mx) * (2 * s - 1), my + (pb.y - my) * (2 * s - 1)];
-    const rad = s => s <= .5 ? rE + (rN - rE) * 2 * s : rN + (rE - rN) * (2 * s - 1);
-    const piece = (s0, s1, t0, t1) => { const a = pos(s0), b = pos(s1); E.push(a[0], a[1], b[0], b[1], Math.max(.6, rad(s0) * t0), Math.max(.6, rad(s1) * t1), w, Math.max(rad(s0), rad(s1)) * cut + 2); };
-    const emit = (s0, s1, t0, t1) => { if (s1 - s0 < .004) return; if (s0 < .5 && s1 > .5) { piece(s0, .5, t0, 1); piece(.5, s1, 1, t1); } else piece(s0, s1, t0, t1); };
-    l.poly = [[pa.x, pa.y, 0], [mx, my, .5], [pb.x, pb.y, 1]];
-    let ta = ea + (.5 - ea) * gl, tb = eb + (.5 - eb) * gl, tip = .6 + .4 * gl;
+    const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.max(1, Math.hypot(dx, dy));
+    const rw = Math.max(.7, P.synW * (.4 + 1.2 * l.s) * Math.pow(z, .8)), w = P.orbLevel * (l.x ? P.synOut : P.synIn);
+    const at = s => [pa.x + dx * s, pa.y + dy * s];
+    l.poly = [[pa.x, pa.y, 0], [pb.x, pb.y, 1]];
+    let ta = gl, tb = 1;
     if (l.st === 'cut') {
-      const e = sm5((now - l.tc) / (Math.max(.1, P.synRetract) * 1000)), stub = Math.max(ea, 1 - eb) + .04, reg = P.synRegrow > 0 ? sm5((now - l.tc - P.synRegrow * 1000) / 1600) : 0;
+      const e = sm5((now - l.tc) / (Math.max(.1, P.synRetract) * 1000)), sa = Math.min(.45, pa.r * .8 / d), sb = Math.min(.45, pb.r * .8 / d);
+      const reg = P.synRegrow > 0 ? sm5((now - l.tc - P.synRegrow * 1000) / 1600) : 0;
       if (reg >= 1) l.st = 'ok';
-      else { const a0 = l.u + (stub - l.u) * e, b0 = l.u + (1 - stub - l.u) * e; ta = Math.min(ta, a0 + (.5 - a0) * reg); tb = Math.max(tb, b0 + (.5 - b0) * reg); tip = reg > 0 ? .6 + .4 * reg : 1 - .4 * sm5(e * 3); }
+      else { const a0 = l.u + (sa - l.u) * e, b0 = l.u + (1 - sb - l.u) * e; ta = a0 + (.5 - a0) * reg; tb = b0 + (.5 - b0) * reg; }
     }
-    emit(ea, ta, 1, tip); emit(tb, eb, tip, 1);
+    if (l.st === 'cut') { const a = at(ta), b = at(tb); seg(pa.x, pa.y, a[0], a[1], rw, w); seg(b[0], b[1], pb.x, pb.y, rw, w); }
+    else { const a = at(ta); seg(pa.x, pa.y, a[0], a[1], rw, w); }
   }
+  HV.NS = ns;
   // labels: group names when zoomed out, thought names when zoomed in, the tapped one always
   const gz = 1 - sm5((z - P.groupLabelZ * .7) / (P.groupLabelZ * .5)), nz = sm5((z - P.mapLabelZ) / .5);
   for (const G of MAP.G) { if (!G.el) continue; const q = w2s(G.cx, G.cy); G.el.style.transform = `translate(${q[0]}px,${q[1]}px) translate(-50%,-50%)`; G.el.style.opacity = gz; }
@@ -1210,33 +1179,6 @@ function mapFrame(now) {
     if (on <= .01 || q.x < -60 || q.x > W + 60 || q.y < -30 || q.y > H + 30) { if (n.lab.style.opacity !== '0') n.lab.style.opacity = 0; continue; }
     n.lab.style.transform = `translate(${q.x}px,${q.y - q.r - 6}px) translate(-50%,-100%)`; n.lab.style.opacity = on * (n === lb ? 1 : .7);
   }
-  const v = MAP.v, g = v && v.g; if (!g || !v.ht) return;
-  // pass 1: splat the field
-  const ne = E.length / 8, nv = ne * 6, VB = MAP.vb.length >= nv * 10 ? MAP.vb : (MAP.vb = new Float32Array(nv * 10 + 600));
-  let o = 0;
-  for (let i = 0; i < ne; i++) {
-    const b = i * 8, ax = E[b], ay = E[b + 1], bx = E[b + 2], by = E[b + 3], R = E[b + 7];
-    const x0 = Math.min(ax, bx) - R, y0 = Math.min(ay, by) - R, x1 = Math.max(ax, bx) + R, y1 = Math.max(ay, by) + R;
-    if (x1 < 0 || y1 < 0 || x0 > W || y0 > H) continue;
-    for (const [cx, cy] of [[x0, y0], [x1, y0], [x0, y1], [x0, y1], [x1, y0], [x1, y1]]) { VB[o++] = cx; VB[o++] = cy; for (let k = 0; k < 8; k++) VB[o++] = E[b + k]; }
-  }
-  g.bindFramebuffer(g.FRAMEBUFFER, v.fb); g.viewport(0, 0, MAP.el.width, MAP.el.height);
-  g.clearColor(0, 0, 0, 0); g.clear(g.COLOR_BUFFER_BIT);
-  g.useProgram(v.ps); g.enable(g.BLEND); g.blendFunc(g.ONE, g.ONE);
-  g.uniform2f(v.L.uRes, W, H); g.uniform1f(v.L.uK, Math.max(.5, P.mapSharp));
-  g.bindBuffer(g.ARRAY_BUFFER, v.bs); g.bufferData(g.ARRAY_BUFFER, VB.subarray(0, o), g.DYNAMIC_DRAW);
-  g.enableVertexAttribArray(v.L.aP); g.vertexAttribPointer(v.L.aP, 2, g.FLOAT, false, 40, 0);
-  g.enableVertexAttribArray(v.L.aS); g.vertexAttribPointer(v.L.aS, 4, g.FLOAT, false, 40, 8);
-  g.enableVertexAttribArray(v.L.aR); g.vertexAttribPointer(v.L.aR, 4, g.FLOAT, false, 40, 24);
-  g.drawArrays(g.TRIANGLES, 0, o / 10);
-  g.disableVertexAttribArray(v.L.aS); g.disableVertexAttribArray(v.L.aR);
-  // pass 2: shade like the core
-  g.disable(g.BLEND); g.bindFramebuffer(g.FRAMEBUFFER, null);
-  g.useProgram(v.pc); g.bindBuffer(g.ARRAY_BUFFER, v.bq); g.enableVertexAttribArray(v.C.a); g.vertexAttribPointer(v.C.a, 2, g.FLOAT, false, 0, 0);
-  g.activeTexture(g.TEXTURE0); g.bindTexture(g.TEXTURE_2D, v.tex); g.uniform1i(v.C.uT, 0);
-  g.uniform2f(v.C.uRes, MAP.el.width, MAP.el.height); g.uniform2f(v.C.uLP, MAP.lp[0], MAP.lp[1]); g.uniform1f(v.C.uDpr, MAP.dpr);
-  g.uniform1f(v.C.uRim, .45 * P.rimGain); g.uniform1f(v.C.uGR, 18); g.uniform1f(v.C.uMW, Math.max(.5, P.mapRim)); g.uniform1f(v.C.uLG, P.lightGain); g.uniform1f(v.C.uLH, P.lampH);
-  g.drawArrays(g.TRIANGLES, 0, 3);
 }
 requestAnimationFrame(frame);
 </script>

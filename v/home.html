@@ -46,7 +46,7 @@ const TEXTS = ['Call mom back', 'Light as a material', 'Oat milk run', 'Garden: 
 const P0 = {
   // core body: irregular parts (3 big, 7 small), one cohesive whole
   coreY:.8, coreScale:1, partDrift:.08, idleSpin:60,
-  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.35, onsetKick:120, maxStretch:1.8, followMax:8, grabPull:16,
+  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.5, onsetKick:220, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.4, onsetMin:.12, voiceWave:1.5, voiceWaveGap:450, toneSwirl:900, maxStretch:1.8, followMax:8, grabPull:16,
   // field: 1 = original soft merge, higher = crisper pinch-off between parts
   sharp:1, smallLight:.5,
   // droplets off by default (drops:1 re-enables splash/tear)
@@ -62,7 +62,7 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:1.3, birthDim:4, birthVol:.1, birthRefill:2.5, orbLevel:.3, rimW:9};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v18')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v19')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -116,7 +116,8 @@ void main(){
 
 let W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
 let lvl = 0, avg = 0, rimS = .45, grS = 18, rv = 0, spAcc = 0, tearCd = 0, shoutEnd = -1e9;
-let rec = false, recId = null, recT0 = 0, shown = -1, drop = null, lastOnset = -1e9;
+const PB = [0, 0, 0, 0, 0, 0], FX = [0, 0, 0, 0, 0, 0];
+let lastVWave = -1e9, fluxAvg = 0, centAvg = 2.5, toneV = 0, grabP = null, rec = false, recId = null, recT0 = 0, shown = -1, drop = null, lastOnset = -1e9;
 let micState = 'idle', an = null, ctxA = null, tbuf = null, freq = null;
 const sc = {x:1, v:0, t:1};
 const BS = [0, 0, 0, 0, 0, 0];
@@ -252,7 +253,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v18', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v19', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {
@@ -287,20 +288,21 @@ PH.addEventListener('pointerdown', e => {
     for (const o of ORBS) {
       if (o.state !== 'ok') continue;
       const q = orbPos(o);
-      if (Math.hypot(p.x - q.x, p.y - q.y) < o.r * o.s + 14) {
+      if (Math.hypot(p.x - q.x, p.y - q.y) < o.r * o.s + (e.pointerType === 'touch' ? 26 : 14)) {
         o.grab = true; o.gx = p.x; o.gy = p.y; drag = {id:e.pointerId, o, x0:p.x, y0:p.y, t0:now, moved:0, lp:0, long:false};
         drag.lp = setTimeout(() => { if (drag && drag.o === o && drag.moved < 8) { drag.long = true; togglePin(o, performance.now()); } }, P.pinHold);
         textOrb = o; return;
       }
     }
   }
-  if (!rec && Math.hypot(p.x - CX, p.y - CY) < 90) { startRec(); recId = e.pointerId; return; }
+  if (Math.hypot(p.x - CX, p.y - CY) < RR * 1.15 + (e.pointerType === 'touch' ? 18 : 6)) { grabP = {id:e.pointerId, x0:p.x, y0:p.y, t0:now, moved:0}; return; }
   swipe = {id:e.pointerId, lx:p.x, ly:p.y, acc:0};
   if (now - lastEmpty < 300) { lastEmpty = -1e9; toggle(now); return; }
   lastEmpty = now;
 });
 window.addEventListener('pointermove', e => {
   if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
+  if (grabP && e.pointerId === grabP.id) { const p = pt(e); grabP.moved = Math.max(grabP.moved, Math.hypot(p.x - grabP.x0, p.y - grabP.y0)); }
   const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
   if (swipe && e.pointerId === swipe.id) {
     swipe.acc += Math.hypot(p.x - swipe.lx, p.y - swipe.ly); swipe.lx = p.x; swipe.ly = p.y;
@@ -311,7 +313,10 @@ window.addEventListener('pointermove', e => {
   drag.o.gx = p.x; drag.o.gy = p.y;
 });
 function end(e) {
-  if (rec && e.pointerId === recId) stopRec();
+  if (grabP && e.pointerId === grabP.id) {
+    if (e.type === 'pointerup' && grabP.moved < (e.pointerType === 'touch' ? 18 : 10) && performance.now() - grabP.t0 < 450) { if (rec) stopRec(); else startRec(); }
+    grabP = null;
+  }
   if (swipe && e.pointerId === swipe.id) swipe = null;
   pts.delete(e.pointerId);
   if (!drag || e.pointerId !== drag.id) return;
@@ -526,7 +531,7 @@ function frame(now) {
   spring(sc, dt);
   br = .5 - .5 * Math.cos(T * TAU / 5);
   vis = visNow(now);
-  const recLike = rec || now < shoutEnd, hold = rec;
+  const recLike = rec || now < shoutEnd, hold = !!(grabP && pts.has(grabP.id) && grabP.moved > 4);
   const fing = !!(swipe && pts.has(swipe.id));
   cutS += ((fing ? 1 : 0) - cutS) * Math.min(1, dt * (fing ? P.cutIn : P.cutOut));
   if (fing) {
@@ -548,9 +553,13 @@ function frame(now) {
       bt = bt.map((_, k) => .5 + .5 * Math.sin(T * (2 + .4 * k) + k * 2.3));
     }
   }
-  lvl += (vt - lvl) * Math.min(1, dt * 6);
+  lvl += (vt - lvl) * Math.min(1, dt * (vt > lvl ? P.lvlAtk : P.lvlRel));
   avg += (lvl - avg) * Math.min(1, dt / .3);
-  for (let k = 0; k < 6; k++) BS[k] += (bt[k] - BS[k]) * .08;
+  let flux = 0;
+  for (let k = 0; k < 6; k++) { const dv = bt[k] - PB[k]; FX[k] = Math.max(0, dv); flux += FX[k]; PB[k] = bt[k]; BS[k] += (bt[k] - BS[k]) * Math.min(1, dt * (bt[k] > BS[k] ? P.bandAtk : P.bandRel)); }
+  fluxAvg += (flux - fluxAvg) * Math.min(1, dt / .4);
+  let cn = 0, cs = 0; for (let k = 0; k < 6; k++) { cn += k * bt[k]; cs += bt[k]; }
+  const cent = cs > .05 ? cn / cs : centAvg; toneV = cent - centAvg; centAvg += (cent - centAvg) * Math.min(1, dt / .5);
   rv += ((recLike ? 1 : 0) - rv) * Math.min(1, dt * 4);
   rimS += ((recLike ? .6 + .4 * lvl : .45 + .15 * br + .05 * Math.max(0, 1 - (now - dropPulseT) / 1000)) - rimS) * .12;
   grS += ((18 + 16 * lvl * rv) - grS) * .12;
@@ -629,10 +638,19 @@ function frame(now) {
     c.r = c.rf * R * P.coreScale * (1 + .05 * Math.sin(T * 1.3 + c.a * 2));
     if (c.x === null) { c.x = c.tx; c.y = c.ty; }
   }
-  // onset: the voice "hits" a few petals outward
-  if (recLike && lvl > avg + .12 && now - lastOnset > 150) {
-    lastOnset = now; const k0 = Math.floor(Math.random() * 6);
-    for (let j = 0; j < 3; j++) { const c = CORE[3 + (k0 + j) % 7], ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1, kk = P.onsetKick * lvl; c.vx += ux / ud * kk; c.vy += uy / ud * kk; }
+  // onsets: every syllable / word start hits the petals of the bands that jumped, plus a soft pressure wave through space
+  if (recLike && now - lastOnset > P.onsetGap && flux > fluxAvg * P.onsetRatio + P.onsetMin) {
+    lastOnset = now;
+    for (const c of CORE) {
+      const hitK = c.band >= 0 ? FX[c.band] * 3 : flux * .3, ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1, kk = P.onsetKick * Math.min(1.5, hitK);
+      c.vx += ux / ud * kk; c.vy += uy / ud * kk;
+    }
+    if (P.voiceWave > 0 && now - lastVWave > P.voiceWaveGap) { lastVWave = now; addWave(cx, cy, P.voiceWave * Math.min(1, flux)); }
+  }
+  // tone shifts (spectral centroid moving up/down) swirl the petals around the body
+  if (recLike && Math.abs(toneV) > .05) for (const c of CORE) {
+    if (c.band < 0) continue; const ux = c.x - cx, uy = c.y - cy, ud = Math.hypot(ux, uy) || 1;
+    c.vx += -uy / ud * toneV * P.toneSwirl * dt; c.vy += ux / ud * toneV * P.toneSwirl * dt;
   }
   const kS = P.kShape * (recLike ? P.recLoose : 1);
   const pdl = Math.hypot(PX - cx, PY - cy) || 1;

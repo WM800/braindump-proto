@@ -74,10 +74,9 @@ void main(){
   float f=0.;vec2 G=vec2(0.);float lw=0.;
   for(int i=0;i<40;i++){vec4 b=uB[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float q=pow(b.z*b.z/d2,uK);f+=q;G-=2.*uK*q*dv/d2;lw+=q*b.w;}
   // finger scar: a thin rounded gap carved out of the fluid (like a finger dragged through water), closes as it fades
-  float cg=0.;vec2 cG=vec2(0.);
+  float cg=0.;
   for(int i=0;i<16;i++){float w=uSW[i];if(w<=0.)continue;vec4 sg=uS[i];vec2 e=sg.zw-sg.xy;float t=clamp(dot(p-sg.xy,e)/max(dot(e,e),1.),0.,1.);vec2 dv=p-sg.xy-e*t;float d=max(length(dv),.5);
-    float a=w*.45,u=clamp((d-a)/(w-a),0.,1.),g=1.-u*u*(3.-2.*u);if(g>cg){cg=g;cG=-(6.*u*(1.-u)/(w-a))*dv/d;}}
-  G=G*(1.-cg)-f*cG;f*=1.-cg;
+    float a=w*.45,u=clamp((d-a)/(w-a),0.,1.),g=1.-u*u*(3.-2.*u);cg=max(cg,g);}
   float lwn=f>0.?lw/f:1.;
   float gn=max(length(G),1e-4);
   float sd=(f-1.)/gn;
@@ -92,6 +91,7 @@ void main(){
   float rim=edge*edge*uRim*(.6+1.2*side*side)*lwn;
   float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn;
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
+  c=c*(1.-cg*m)+m*cg*(1.-cg)*4.*uRim*.5*lwn;
   float f2=0.,w2=0.,pw=0.;vec2 G2=vec2(0.);
   for(int i=0;i<48;i++){vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
   f2*=1.-cg;float bw=f2>0.?w2/f2:0.;

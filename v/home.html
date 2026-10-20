@@ -46,7 +46,7 @@ const TEXTS = ['Call mom back', 'Light as a material', 'Oat milk run', 'Garden: 
 const P0 = {
   // core body: irregular parts (3 big, 7 small), one cohesive whole
   coreY:.8, coreScale:1, partDrift:.08, idleSpin:60,
-  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.42, recShrink:.25, petalMax:.95, leashK:120, onsetKick:170, agcFloor:.4, agcPeak:.35, puffK:50, bandPush:12, toneStretch:.2, shiver:7, centerK:40, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.2, onsetMin:.18, voiceWave:1.5, voiceWaveGap:450, toneSwirl:400, maxStretch:1.8, followMax:8, grabPull:16,
+  kShape:60, dampR:1, recLoose:.55, kLink:60, lobeMax:.42, recShrink:.25, petalMax:.92, leashK:260, onsetKick:170, agcFloor:.4, agcPeak:.35, puffK:50, bandPush:12, toneStretch:.2, shiver:7, centerK:40, lvlAtk:30, lvlRel:7, bandAtk:28, bandRel:6, onsetGap:90, onsetRatio:1.2, onsetMin:.18, voiceWave:1.5, voiceWaveGap:450, toneSwirl:400, maxStretch:1.8, followMax:8, grabPull:16,
   // field: 1 = original soft merge, higher = crisper pinch-off between parts
   sharp:1, smallLight:.5,
   // droplets off by default (drops:1 re-enables splash/tear)
@@ -62,7 +62,7 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:1.6, birthPull:5};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v24')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v25')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -90,6 +90,8 @@ void main(){
   // rim = estimated px distance to the outline: log(field) over a softened gradient (no singularity at ball centres),
   // so body, petals and necks share one width and balls sitting inside get no halo
   float edge=uMW>0.?1.-smoothstep(0.,uMW,log(max(f,1e-4))*f/max(length(GS),1e-4)):max(1.-smoothstep(1.,uEB,f),(1.-smoothstep(0.,7.,sd))*(1.-smoothstep(1.,1.25,f)));
+  // while cut, pieces use the per-piece (group-aware) rim from before the voice rework
+  if(uSep>0.)edge=mix(edge,(1.-smoothstep(0.,9.,sd))*(1.-smoothstep(1.4,3.,f)),uSep);
   vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
   // lamp under the finger/cursor: original shading, direction toward the lamp point, its pull fading softly with distance (uLH)
   vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));
@@ -258,7 +260,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v24', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v25', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const INT = {maxThoughts:9, maxDrops:30};
 const META = Object.keys(P0).map(k => {

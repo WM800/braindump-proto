@@ -14,8 +14,8 @@
 <link rel="apple-touch-startup-image" href="splash-1170x2532.png" media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)">
 <link rel="apple-touch-startup-image" href="splash-1290x2796.png" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)">
 <link rel="apple-touch-startup-image" href="splash-750x1334.png" media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)">
-<meta name="apple-mobile-web-app-title" content="blob">
-<title>blob</title>
+<meta name="apple-mobile-web-app-title" content="Blob">
+<title>Blob</title>
 <style>
 html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #111; }
 body { height: 100dvh; }
@@ -168,6 +168,22 @@ iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 
   } else startPoll();
 })();
 </script>
+<div id="inst" style="position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 18px);transform:translateX(-50%);z-index:9999;display:none;align-items:center;gap:12px;max-width:calc(100vw - 32px);padding:10px 14px;border-radius:22px;background:rgba(20,20,20,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.18);color:#eee;font:14px system-ui,sans-serif">
+<img src="icon-192.png" width="32" height="32" style="border-radius:8px"><span id="instT">Zainstaluj Blob</span>
+<button id="instB" style="border:0;border-radius:14px;padding:7px 14px;background:#fff;color:#000;font:inherit;font-weight:600">Zainstaluj</button>
+<button id="instX" aria-label="Zamknij" style="border:0;background:none;color:#aaa;font-size:20px;padding:0 2px">×</button></div>
+<script>(()=>{const K='blobInstDismiss',D=5*864e5,s=document.getElementById('inst');let ev=null;
+const ok=()=>{try{return Date.now()-(+localStorage.getItem(K)||0)>D}catch(e){return true}};
+const sa=matchMedia('(display-mode: standalone)').matches||matchMedia('(display-mode: fullscreen)').matches||navigator.standalone;
+const hide=()=>{s.style.display='none'};
+const dis=()=>{try{localStorage.setItem(K,Date.now())}catch(e){}hide()};
+document.getElementById('instX').onclick=dis;
+if(sa||!ok())return;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();ev=e;setTimeout(()=>{s.style.display='flex'},1500)});
+addEventListener('appinstalled',hide);
+document.getElementById('instB').onclick=async()=>{if(!ev)return dis();ev.prompt();await ev.userChoice;ev=null;dis()};
+if(/iphone|ipad|ipod/i.test(navigator.userAgent)){document.getElementById('instT').innerHTML='Dotknij <b>Udostępnij</b> ⎙ → <b>Do ekranu głównego</b>';document.getElementById('instB').style.display='none';setTimeout(()=>{s.style.display='flex'},2500)}
+})()</script>
 <script>addEventListener("load",()=>setTimeout(()=>{const b=document.getElementById("boot");b.style.opacity=0;setTimeout(()=>b.remove(),700)},250))</script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 {
-  "name": "blob",
-  "short_name": "blob",
+  "name": "Blob",
+  "short_name": "Blob",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

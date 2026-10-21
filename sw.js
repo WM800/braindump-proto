@@ -1,4 +1,4 @@
-const CACHE = 'braindump-proto-8';
+const CACHE = 'braindump-proto-9';
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));

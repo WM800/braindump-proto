@@ -80,14 +80,14 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, synSoftLo:.25, synSoftHi:.85, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
 try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v34')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
 uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
-uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
+uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec2 uSSm;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
@@ -140,7 +140,7 @@ void main(){
   // filled synapses = the same shader with a wider edge: where the field is mostly synapse (smooth share fs/f2) the edge band
   // stretches over the whole width and the normal follows a tube profile, so ball and synapse stay one smooth structure
   if(uSF>0.){
-    float wq=smoothstep(.25,.85,f2>0.?fs/f2:0.);float ir=inversesqrt(max(f2,1.));
+    float wq=smoothstep(uSSm.x,uSSm.y,f2>0.?fs/f2:0.);float ir=inversesqrt(max(f2,1.));
     float e3=1.-smoothstep(1.,uOB,pow(max(f2,1.),1.-wq));
     vec3 N3=normalize(vec3(-G2/gn2*.9*mix(e2,ir,wq),1.));float s3=max(dot(N3.xy,ld),0.);float k3=bw+pk*.5;
     float rim3=e3*e3*uRim*(.6+1.2*s3*s3*att)*k3*mix(1.,uSF,wq*(1.-ir));
@@ -197,7 +197,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS','uSF','uSSm'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -311,7 +311,7 @@ const DEV_NAMES = {
   topY:'Górna granica myśli', bottomY:'Dolna granica myśli', spread:'Rozrzut myśli', yCurve:'Krzywa wysokości myśli', jitter:'Drganie myśli', jitterY:'Drganie myśli w pionie', newB:'Jasność nowych myśli', oldB:'Jasność starych myśli', homeK:'Siła powrotu do domu', homeRate:'Szybkość powrotu do domu', homeGap:'Odstęp przy powrocie do domu', homePull:'Przyciąganie do domu', gapBreath:'Oddychanie odstępów', wander:'Błądzenie myśli', stagger:'Przesunięcie czasowe myśli', repel:'Odpychanie myśli', cohesion:'Spójność grupy myśli', tailK:'Sprężystość ogona', tailC:'Tłumienie ogona', arriveT:'Czas wejścia myśli', leaveT:'Czas wyjścia myśli', leaveDim:'Przyciemnienie przy wyjściu', edgeFade:'Zanikanie przy krawędzi', maxThoughts:'Maks. liczba myśli na ekranie', labelGap:'Odstęp etykiety od myśli',
   pinHold:'Czas przytrzymania pinezki', pinRim:'Obwódka pinezki', pinInner:'Wnętrze pinezki', pinFric:'Tarcie pinezki', pinPush:'Odpychanie pinezki', auraI:'Intensywność aury', auraScale:'Wielkość aury', auraDur:'Czas trwania aury', dropAnim:'Animacja upuszczenia', birthR:'Promień narodzin', detachK:'Siła oderwania', birthDim:'Przyciemnienie narodzin', birthVol:'Głośność narodzin', birthRefill:'Uzupełnianie po narodzinach',
   mapNodeR:'Wielkość kulek na mapie', mapRepel:'Odpychanie kulek', mapGroupK:'Przyciąganie grup', mapPull:'Przyciąganie do środka', mapDamp:'Tłumienie ruchu mapy', mapDrift:'Dryf mapy', mapPanFric:'Tarcie przesuwania mapy', mapEnter:'Szybkość wejścia w mapę', mapExit:'Szybkość wyjścia z mapy', mapPullLen:'Zasięg przyciągania przy wejściu', mapNoReturn:'Próg punktu bez powrotu', mapCutSpeed:'Próg cięcia synaps', shakeTh:'Czułość wstrząsu',
-  synW:'Grubość synaps', synFill:'Wypełnianie synaps (1 = tak)', synFillI:'Intensywność wypełnienia', synInset:'Odstęp synapsy od krawędzi kulki', synIn:'Siła synaps wchodzących', synOut:'Siła synaps wychodzących', synLen:'Długość synaps', synK:'Sprężystość synaps', synCross:'Przenikanie synaps', synRetract:'Cofanie synaps', synRegrow:'Odrastanie synaps',
+  synW:'Grubość synaps', synFill:'Wypełnianie synaps (1 = tak)', synFillI:'Intensywność wypełnienia', synInset:'Odstęp synapsy od krawędzi kulki', synIn:'Siła synaps wchodzących', synOut:'Siła synaps wychodzących', synLen:'Długość synaps', synK:'Sprężystość synaps', synCross:'Przenikanie synaps', synSoftLo:'Miękkość wypełnienia – dolna granica', synSoftHi:'Miękkość wypełnienia – górna granica', synRetract:'Cofanie synaps', synRegrow:'Odrastanie synaps',
   mapLabelZ:'Próg widoczności etykiet kulek', groupLabelZ:'Próg widoczności nazw grup'
 };
 const DEV_CATS = [
@@ -324,7 +324,7 @@ const DEV_CATS = [
   ['Myśli', ['topY','bottomY','spread','yCurve','jitter','jitterY','newB','oldB','homeK','homeRate','homeGap','homePull','gapBreath','wander','stagger','repel','cohesion','tailK','tailC','arriveT','leaveT','leaveDim','edgeFade','maxThoughts','labelGap']],
   ['Pinezki', ['pinHold','pinRim','pinInner','pinFric','pinPush','auraI','auraScale','auraDur','dropAnim','birthR','detachK','birthDim','birthVol','birthRefill']],
   ['Mapa myśli', ['mapNodeR','mapRepel','mapGroupK','mapPull','mapDamp','mapDrift','mapPanFric','mapEnter','mapExit','mapPullLen','mapNoReturn','mapCutSpeed','shakeTh']],
-  ['Synapsy', ['synW','synFill','synFillI','synInset','synIn','synOut','synLen','synK','synCross','synRetract','synRegrow']],
+  ['Synapsy', ['synW','synFill','synFillI','synInset','synIn','synOut','synLen','synK','synCross','synRetract','synRegrow','synSoftLo','synSoftHi']],
   ['Etykiety', ['mapLabelZ','groupLabelZ']]
 ];
 let devQ = '', devOpen = new Set();
@@ -459,7 +459,7 @@ function draw() {
   g.uniform1f(L.uRim, rimS * P.rimGain); g.uniform1f(L.uGR, grS);
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uEB, Math.max(1.05, P.rimBand)); g.uniform1f(L.uOB, Math.max(1.05, P.orbBand)); g.uniform1f(L.uMW, Math.max(.5, P.rimMinPx)); g.uniform1f(L.uLG, P.lightGain); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
-  g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0);
+  g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0); g.uniform2f(L.uSSm, P.synSoftLo, P.synSoftHi);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
   g.drawArrays(g.TRIANGLES, 0, 3);
 }

@@ -208,6 +208,7 @@ const SFX = (() => {
 
   return {
     unlock: init,
+    asArm() {}, asBirth() {}, // hooks for the sound session: hold on the main blob reached the threshold / the assistant tore away
     // map blob drag: s = max synapse tension 0..1 (1 = tears), every frame while held → membrane tone rising a fifth, shivering near the tear
     stretch: ev(s => { if (s < .05) return; const c = cv('str', strV), t = ac.currentTime, k = Math.min(1, s), f = hz(50) * Math.pow(2, 7 * k * k / 12);
       c.g.gain.setTargetAtTime(.045 * Math.pow(k, 1.5), t, .12); c.a.frequency.setTargetAtTime(f, t, .05); c.b.frequency.setTargetAtTime(f + .5 + 7 * k * k * k, t, .05); c.lp.frequency.setTargetAtTime(260 + 700 * k, t, .06); }),
@@ -293,7 +294,7 @@ const P0 = {
   // finger in thick water: gentle when slow, strong (can split the core) when fast
   fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:4, fragHealK:2.5, healZeta:.38, mergeV:6, mergeD:.6, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
-  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, fps:0, adMin:.55, coreFollow:.05, grabSharp:9, ripAmp:.6, trlAmp:.55, trlLife:1.4, wkSpeed:85, ripLife:2.4, ripSpeed:170, ripStep:34,
+  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, fps:0, adMin:.55, asHold:1200, coreFollow:.05, grabSharp:9, ripAmp:.6, trlAmp:.55, trlLife:1.4, wkSpeed:85, ripLife:2.4, ripSpeed:170, ripStep:34,
   // light
   lightLag:.25, lampH:340, lampZ:70, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
@@ -308,7 +309,7 @@ const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
 uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uLZ,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
-uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];uniform vec4 uR[12];uniform vec4 uT[48];uniform float uNR,uNT;
+uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];uniform vec4 uR[12];uniform vec4 uT[48];uniform float uNR,uNT;uniform vec4 uAs;
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;vec2 p0=p;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
@@ -380,7 +381,9 @@ void main(){
   float tg=0.;for(int i=0;i<48;i++){if(float(i)>=uNT)break;vec4 t=uT[i];if(t.z<=0.)continue;vec2 dv=p0-t.xy;float d2=dot(dv,dv);float rr=t.w+40.;if(d2>rr*rr)continue;float d=max(sqrt(d2),1.);float wl=15.+9.*t.w/120.;float x=(d-t.w)/wl;float e=exp(-x*x*1.2);float s=6.2832*x;
     tg+=t.z*e*(-2.4*x*cos(s)-6.2832*sin(s))/wl*dot(dv/d,vec2(-.7071,-.7071))*inversesqrt(1.+d*.03);}
   float hv=rg*.75+tg*.5;hv=.5*(hv+sqrt(hv*hv+4e-5))-.0045;c+=clamp(hv,0.,1.)*(1.-max(m,m2));
-  gl_FragColor=vec4(vec3(c),1.);
+  // assistant identity: its blob (and, while it speaks without being pulled out, the main blob's rim) is tinted cool teal
+  vec3 col=vec3(c);if(uAs.w>0.){float k=uAs.w*(1.-smoothstep(uAs.z*.55,uAs.z*1.5,length(p0-uAs.xy)));col=mix(col,vec3(c)*vec3(.35,.92,1.15)+vec3(0.,.01,.016)*k,clamp(k,0.,1.));}
+  gl_FragColor=vec4(col,1.);
 }`;
 
 let adScale = 1, resScale = 1, W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
@@ -430,7 +433,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uLZ','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uR','uT','uNR','uNT','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uLZ','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uAs','uR','uT','uNR','uNT','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -502,6 +505,54 @@ function visNow(now) { return visFrom + (visTo - visFrom) * ease(clamp((now - vi
 const pt = e => { const r = PH.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
 function orbPos(o) { return {x:o.x, y:o.y + 40 * (1 - vis)}; }
 
+// ===== speech: the assistant reads thoughts. TTS.speak(text) is the only entry point, so Web Speech can later be swapped for an
+// on-device model (Piper / Kokoro WASM) without touching callers. TTS.level (0..1) drives the "speaking" glow.
+const TTS = (() => {
+  const ss = window.speechSynthesis; let voice = null, speaking = false, pulse = -1e9, lv = 0;
+  const pick = () => {
+    const vs = ss ? ss.getVoices().filter(v => /^pl/i.test(v.lang)) : []; if (!vs.length) return null;
+    const score = v => (/natural|online|neural|premium|enhanced/i.test(v.name) ? 4 : 0) + (/google|microsoft|apple/i.test(v.name) ? 2 : 0) + (v.localService ? 0 : 1);
+    return vs.sort((a, b) => score(b) - score(a))[0];
+  };
+  if (ss) { ss.onvoiceschanged = () => { voice = pick(); }; voice = pick(); }
+  return {
+    get speaking() { return speaking; },
+    speak(text) {
+      if (!ss || !text) return; ss.cancel();
+      const u = new SpeechSynthesisUtterance(text); u.lang = 'pl-PL'; u.rate = .98; if (voice || (voice = pick())) u.voice = voice;
+      u.onstart = () => { speaking = true; }; u.onend = u.onerror = () => { speaking = false; }; u.onboundary = () => { pulse = performance.now(); };
+      speaking = true; ss.speak(u);
+    },
+    stop() { if (ss) ss.cancel(); speaking = false; },
+    summary(text) { const t = String(text).split(/(?<=[.!?])s+/).slice(0, 2).join(' '); return t.length > 220 ? t.slice(0, 217) + '…' : t; },
+    level(now) { const t = speaking ? .55 + .25 * Math.sin(now * .011) + (now - pulse < 140 ? .2 : 0) : 0; lv += (t - lv) * .2; return lv < .01 ? 0 : lv; },
+  };
+})();
+const TT = {key:null, n:0, t:-1e9};
+// shared by home and map: tap = read the title, quick second/third tap = read the content (first sentences)
+function thoughtTap(key, title, body, now) {
+  if (key === TT.key && now - TT.t < 450) TT.n++; else TT.n = 1;
+  TT.key = key; TT.t = now;
+  TTS.speak(TT.n === 1 ? title : TTS.summary(body || title));
+}
+// original recordings are not stored in the prototype yet: hook for "hold a thought ~4 s = play the original"
+const RECS = {has: o => false, play: o => {}};
+// the assistant: a blob entity with a list of functions (only 'assistant' exists), pulled out of the main blob by hold + pull
+function spawnAssistant(p, now) {
+  const o = mkOrb('Assistant'); o.asst = {id:'asst' + o.id, type:'assistant', fns:['assistant']};
+  o.r = 20; o.pinned = true; o.state = 'back'; o.goneT = now; o.s = 0; o.x = CX; o.y = CY; o.px = CX; o.py = CY; o.vx = o.vy = 0;
+  o.grab = true; o.gx = p.x; o.gy = p.y; ORBS.unshift(o); textOrb = o; textShowT = now;
+  drag = {id:grabP.id, o, x0:p.x, y0:p.y, t0:now, moved:99, lp:0, long:false};
+  addWave(CX, CY, P.landAmp); SFX.asBirth(); return o;
+}
+function drawAs(g, L) {
+  const now = performance.now(), lv = TTS.level(now), as = ORBS.find(o => o.asst); let x = 0, y = 0, r = 1, k = 0;
+  if (!(MAP.on && MAP.a > 0)) {
+    if (as && as.x !== null && as.state !== 'gone') { const q = orbPos(as); x = q.x; y = q.y; r = as.r * as.s * 2.4; k = (.6 + .4 * lv) * as.s; }
+    else if (lv > 0) { x = CX; y = CY; r = RR * 1.3; k = .8 * lv; }
+  }
+  g.uniform4f(L.uAs, x, y, r, k);
+}
 // liquid ripples on the background (both screens): rings born under a moving finger, fading as they spread
 const RP = [];
 function addRip(x, y, amp) {
@@ -569,7 +620,7 @@ const DEV_NAMES = {
   fps:'Licznik FPS (lewy górny róg)', mapRes:'Rozdzielczość mapy (×DPR)', adMin:'Min. rozdzielczość adaptacyjna', wkSpeed:'Prędkość fal kilwateru', trlAmp:'Siła kilwateru', trlLife:'Czas życia kilwateru', synTear:'Próg zerwania synapsy',
   coreY:'Położenie kuli w pionie', coreScale:'Wielkość kuli', partDrift:'Dryf części kuli', idleSpin:'Obrót w spoczynku', kShape:'Sztywność kształtu', dampR:'Tłumienie ruchu', recLoose:'Luz powrotu do kształtu', kLink:'Siła połączeń', lobeMax:'Maks. wypukłość płatów', recShrink:'Kurczenie przy powrocie', petalMax:'Maks. rozmiar płatków', leashK:'Sprężystość smyczy', sharp:'Ostrość granic (1 = miękko)', smallLight:'Światło małych części',
   onsetKick:'Siła impulsu przy dźwięku', agcFloor:'Minimalne wzmocnienie', agcPeak:'Szczytowe wzmocnienie', puffK:'Siła pufów', bandPush:'Odpychanie pasmami', toneStretch:'Rozciąganie tonem', shiver:'Drżenie', centerK:'Siła powrotu do środka', lvlAtk:'Narastanie głośności', lvlRel:'Opadanie głośności', bandAtk:'Narastanie pasma', bandRel:'Opadanie pasma', onsetGap:'Odstęp między impulsami', onsetRatio:'Próg wykrycia impulsu', onsetMin:'Minimalna siła impulsu', voiceWave:'Fala głosu', voiceWaveGap:'Odstęp fal głosu', toneSwirl:'Wirowanie tonem', maxStretch:'Maks. rozciągnięcie', followMax:'Maks. podążanie za dźwiękiem',
-  grabPull:'Siła przyciągania palcem', coreFollow:'Ruch całego bloba za palcem', grabSharp:'Zawężenie chwytanego kawałka', grabLoose:'Luz przy chwytaniu', fingerR:'Promień palca', cutR:'Promień cięcia', cutEase:'Płynność cięcia', cutIn:'Cięcie – wejście', cutOut:'Cięcie – wyjście', scarLife:'Czas życia blizny', scarSpeed:'Prędkość blizny', scarPush:'Odpychanie przez bliznę', cutSpeed:'Próg szybkiego cięcia', cutGap:'Odstęp po cięciu', cutImpulse:'Impuls cięcia', cutDrag:'Opór przy cięciu', cutHold:'Czas trzymania cięcia', cutHeal:'Szybkość zabliźniania', fingerPush:'Siła pchnięcia palcem', fingerDrag:'Opór palca', fingerFast:'Próg szybkiego palca', tearSpeed:'Próg rozerwania', tearCool:'Czas ostygnięcia rozerwania', fastFlee:'Ucieczka przy szybkim ruchu', orbCutSpeed:'Próg cięcia kuli', orbSplit:'Podział kuli', orbHeal:'Gojenie kuli',
+  grabPull:'Siła przyciągania palcem', asHold:'Przytrzymanie bloba do asystenta (ms)', coreFollow:'Ruch całego bloba za palcem', grabSharp:'Zawężenie chwytanego kawałka', grabLoose:'Luz przy chwytaniu', fingerR:'Promień palca', cutR:'Promień cięcia', cutEase:'Płynność cięcia', cutIn:'Cięcie – wejście', cutOut:'Cięcie – wyjście', scarLife:'Czas życia blizny', scarSpeed:'Prędkość blizny', scarPush:'Odpychanie przez bliznę', cutSpeed:'Próg szybkiego cięcia', cutGap:'Odstęp po cięciu', cutImpulse:'Impuls cięcia', cutDrag:'Opór przy cięciu', cutHold:'Czas trzymania cięcia', cutHeal:'Szybkość zabliźniania', fingerPush:'Siła pchnięcia palcem', fingerDrag:'Opór palca', fingerFast:'Próg szybkiego palca', tearSpeed:'Próg rozerwania', tearCool:'Czas ostygnięcia rozerwania', fastFlee:'Ucieczka przy szybkim ruchu', orbCutSpeed:'Próg cięcia kuli', orbSplit:'Podział kuli', orbHeal:'Gojenie kuli',
   fragMin:'Minimalny rozmiar fragmentu', maxFrags:'Maks. liczba fragmentów', bondR:'Zasięg wiązania', fragK:'Sprężystość fragmentów', fragLoose:'Luz fragmentów', gapK:'Siła zamykania przerwy', contact:'Siła kontaktu', healRate:'Szybkość gojenia', fragHealK:'Siła gojenia fragmentów', healZeta:'Tłumienie gojenia', mergeV:'Próg łączenia (prędkość)', mergeD:'Próg łączenia (odległość)', mergeR:'Promień łączenia', volumeLoss:'Utrata objętości przy łączeniu',
   drops:'Krople włączone (1 = tak)', splashTh:'Próg rozbryzgu', splashRate:'Częstość rozbryzgów', maxDrops:'Maks. liczba kropli', splashSpeedMin:'Min. prędkość rozbryzgu', splashSpeedMax:'Maks. prędkość rozbryzgu', splashSpread:'Rozrzut rozbryzgu', dropMin:'Min. rozmiar kropli', dropMax:'Maks. rozmiar kropli', dropLost:'Szansa zagubienia kropli', dropReturn:'Czas powrotu kropli', splashDelay:'Opóźnienie rozbryzgu', splashFric:'Tarcie kropli', dropLight:'Jasność kropli',
   waveSpeed:'Prędkość fal', waveLen:'Długość fali', waveLife:'Czas życia fali', pinWaveAmp:'Amplituda fali przy pinezce', trailAmp:'Amplituda śladu', trailStep:'Odstęp śladu', landAmp:'Amplituda lądowania', waveKick:'Impuls fali',
@@ -583,7 +634,7 @@ const DEV_NAMES = {
 const DEV_CATS = [
   ['Kula i rdzeń', ['coreY','coreScale','partDrift','idleSpin','kShape','dampR','recLoose','kLink','lobeMax','recShrink','petalMax','leashK','sharp','smallLight']],
   ['Dźwięk', ['onsetKick','agcFloor','agcPeak','puffK','bandPush','toneStretch','shiver','centerK','lvlAtk','lvlRel','bandAtk','bandRel','onsetGap','onsetRatio','onsetMin','voiceWave','voiceWaveGap','toneSwirl','maxStretch','followMax']],
-  ['Palec i cięcie', ['grabPull','coreFollow','grabSharp','grabLoose','fingerR','cutR','cutEase','cutIn','cutOut','scarLife','scarSpeed','scarPush','cutSpeed','cutGap','cutImpulse','cutDrag','cutHold','cutHeal','fingerPush','fingerDrag','fingerFast','tearSpeed','tearCool','fastFlee','orbCutSpeed','orbSplit','orbHeal']],
+  ['Palec i cięcie', ['asHold','grabPull','coreFollow','grabSharp','grabLoose','fingerR','cutR','cutEase','cutIn','cutOut','scarLife','scarSpeed','scarPush','cutSpeed','cutGap','cutImpulse','cutDrag','cutHold','cutHeal','fingerPush','fingerDrag','fingerFast','tearSpeed','tearCool','fastFlee','orbCutSpeed','orbSplit','orbHeal']],
   ['Fragmenty', ['fragMin','maxFrags','bondR','fragK','fragLoose','gapK','contact','healRate','fragHealK','healZeta','mergeV','mergeD','mergeR','volumeLoss']],
   ['Krople i fale', ['drops','splashTh','splashRate','maxDrops','splashSpeedMin','splashSpeedMax','splashSpread','dropMin','dropMax','dropLost','dropReturn','splashDelay','splashFric','dropLight','waveSpeed','waveLen','waveLife','pinWaveAmp','trailAmp','trailStep','landAmp','waveKick']],
   ['Światło', ['lightLag','lampH','lampZ','idleR','idleT','idleBlend','wanderAmp','wanderSpeed','lightGain','rimBand','rimMinPx','rimGain','orbBand','orbLevel','glowI']],
@@ -664,7 +715,8 @@ PH.addEventListener('pointerdown', e => {
       const q = orbPos(o);
       if (Math.hypot(p.x - q.x, p.y - q.y) < o.r * o.s + (e.pointerType === 'touch' ? 26 : 14)) {
         o.grab = true; o.gx = p.x; o.gy = p.y; drag = {id:e.pointerId, o, x0:p.x, y0:p.y, t0:now, moved:0, lp:0, long:false}; SFX.grab(ORBS.indexOf(o));
-        drag.lp = setTimeout(() => { if (drag && drag.o === o && drag.moved < 8) { drag.long = true; togglePin(o, performance.now()); } }, P.pinHold);
+        drag.lp = setTimeout(() => { if (drag && drag.o === o && drag.moved < 8 && !o.asst) { drag.long = true; togglePin(o, performance.now()); } }, P.pinHold);
+        setTimeout(() => { if (drag && drag.o === o && drag.moved < 8 && RECS.has(o)) RECS.play(o); }, 4000);
         textOrb = o; return;
       }
     }
@@ -711,7 +763,7 @@ function end(e) {
   const o = drag.o, now = performance.now();
   o.grab = false; clearTimeout(drag.lp);
   if (drag.long) { if (o.pinned) { o.px = o.x; o.py = o.y; } }
-  else if (now - drag.t0 < 200 && drag.moved < 10) { o.pulseT = now; textShowT = now; textOrb = o; SFX.tap(ORBS.indexOf(o)); }
+  else if (now - drag.t0 < 200 && drag.moved < 10) { o.pulseT = now; textShowT = now; textOrb = o; SFX.tap(ORBS.indexOf(o)); if (!o.asst) thoughtTap(o.text, o.text, o.body, now); }
   else if (Math.hypot(o.x - CX, o.y - CY) < 60) { o.state = 'merge'; o.pinned = false; o.mT = now; o.mx = o.x; o.my = o.y; textShowT = -1e9; SFX.merge(); }
   else { if (o.pinned && drag.moved >= 8) { o.px = o.x; o.py = o.y; } textShowT = -1e9; }
   drag = null;
@@ -738,6 +790,7 @@ function draw() {
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uEB, Math.max(1.05, P.rimBand)); g.uniform1f(L.uOB, Math.max(1.05, P.orbBand)); g.uniform1f(L.uMW, Math.max(.5, P.rimMinPx)); g.uniform1f(L.uLG, P.lightGain); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH); g.uniform1f(L.uLZ, P.lampZ);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0); g.uniform2f(L.uSSm, P.synSoftLo, P.synSoftHi);
+  drawAs(g, L);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
   ripUpload(performance.now()); g.uniform4fv(L.uR, HV.R); g.uniform4fv(L.uT, HV.T); g.uniform1f(L.uNR, RP.length); g.uniform1f(L.uNT, TR.length);
   g.drawArrays(g.TRIANGLES, 0, 3);
@@ -945,7 +998,10 @@ function frame(now) {
   spring(sc, dt);
   br = .5 - .5 * Math.cos(T * TAU / 5);
   vis = visNow(now);
-  const recLike = rec || now < shoutEnd, hold = !!(grabP && pts.has(grabP.id) && grabP.moved > 4); if (grabP) grabP.heldMs = now - grabP.t0;
+  let hold; const recLike = rec || now < shoutEnd; hold = !!(grabP && pts.has(grabP.id) && grabP.moved > 4); if (grabP) grabP.heldMs = now - grabP.t0;
+  // hold the main blob still ~1.2 s = armed (it swells); then pull = a new assistant tears off and follows the finger
+  if (grabP && pts.has(grabP.id) && !grabP.armed && grabP.moved <= 10 && grabP.heldMs >= P.asHold && !ORBS.some(o => o.asst)) { grabP.armed = true; sc.t = 1.1; SFX.asArm(); }
+  if (grabP && grabP.armed && pts.has(grabP.id) && grabP.moved > 26) { spawnAssistant(pts.get(grabP.id), now); grabP = null; hold = false; sc.t = 1; }
   if (hold && !rec) SFX.stretch(clamp(Math.hypot(PX - grabP.x0, PY - grabP.y0) / (RR * 1.4), 0, 1) * .85); // main blob pulled: same soft membrane tension, never at tearing pitch
   const fing = !!(swipe && pts.has(swipe.id));
   cutS += ((fing ? 1 : 0) - cutS) * Math.min(1, dt * (fing ? P.cutIn : P.cutOut));
@@ -1252,7 +1308,7 @@ function frame(now) {
   }
   for (let i = ORBS.length - 1; i >= 0; i--) {
     const o = ORBS[i];
-    if (o.state === 'leave' && now - o.leaveT > P.leaveT * 1000) { if (textOrb === o) textOrb = null; ORBS.splice(i, 1); }
+    if ((o.state === 'leave' && now - o.leaveT > P.leaveT * 1000) || (o.asst && o.state === 'gone')) { if (textOrb === o) textOrb = null; ORBS.splice(i, 1); }
   }
 
   if (fing && psp > P.orbCutSpeed && SCAR.length > 1) {
@@ -1485,7 +1541,7 @@ function mapUp(e) {
       let best = null, bd = 1e9;
       for (const n of MAP.N) { const q = w2s(n.x, n.y), d = Math.hypot(p.x - q[0], p.y - q[1]) - n.r * MAP.cam.z; if (d < bd) { bd = d; best = n; } }
       if (p.y > H - 64 && Math.abs(p.x - W / 2) < 70) { mapExit(now); best = null; }
-      else if (best && bd < (e.pointerType === 'touch' ? 20 : 10)) { MAP.lab = best; MAP.labT = now; MAP.tapT = -1e9; SFX.node(MAP.N.indexOf(best)); }
+      else if (best && bd < (e.pointerType === 'touch' ? 20 : 10)) { MAP.lab = best; MAP.labT = now; MAP.tapT = -1e9; SFX.node(MAP.N.indexOf(best)); thoughtTap(best.text, best.text, best.o && best.o.body, now); }
       else { MAP.lab = null; if (now - MAP.tapT < 320) { MAP.ct = mapFit(); MAP.tapT = -1e9; SFX.fit(); } else MAP.tapT = now; }
     }
   }

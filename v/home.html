@@ -137,23 +137,17 @@ const SFX = (() => {
   // continuous gesture voices: built once, driven by the gesture, fade out by themselves ~0.1 s after updates stop
   const CV = {};
   function cv(name, build) { const c = CV[name] || (CV[name] = build()); clearTimeout(c.to); c.to = setTimeout(() => c.g.gain.setTargetAtTime(0, ac.currentTime, c.rel || .15), 90); return c; }
-  // finger gliding on water: no noise at all — three low tuned sines (D3 A3 D4), each with its own slow vibrato, under a slow liquid sway of loudness;
-  // speed opens the lowpass and lifts the pitch a little; a faster finger adds rare soft rising bubble glides (gl)
+  // finger parting the water: one continuous voice, no noise and no percussive events — three low tuned sines (D3 A3 D4) with slow vibrato
+  // under a liquid sway of loudness, plus a soft A4 shimmer that blooms with gesture time and wake; panned to the finger
   function washV() {
-    const g = ac.createGain(), lp = ac.createBiquadFilter(), am = ac.createGain(), v = vout(.45), os = [];
-    g.gain.value = 0; am.gain.value = 1; lp.type = 'lowpass'; lp.Q.value = .5; lp.frequency.value = 300; lp.connect(am); am.connect(g); g.connect(v);
-    for (const [m, a, vr] of [[50, 1, 1.1], [57, .45, 1.45], [62, .22, .8]]) {
-      const k = ac.createGain(), o = ac.createOscillator(), l = ac.createOscillator(), lg = ac.createGain(); k.gain.value = a; k.connect(lp); o.type = 'sine'; o.frequency.value = hz(m);
-      l.frequency.value = vr; lg.gain.value = hz(m) * .006; l.connect(lg); lg.connect(o.frequency); o.connect(k); o.start(); l.start(); os.push([o, hz(m)]);
+    const g = ac.createGain(), lp = ac.createBiquadFilter(), am = ac.createGain(), pn = ac.createStereoPanner ? ac.createStereoPanner() : null, v = vout(.45), os = [], vib = [], top = ac.createGain();
+    g.gain.value = 0; am.gain.value = 1; top.gain.value = 0; lp.type = 'lowpass'; lp.Q.value = .5; lp.frequency.value = 300; lp.connect(am); am.connect(g); g.connect(pn || v); if (pn) pn.connect(v); top.connect(lp);
+    for (const [m, a, vr, dst] of [[50, 1, 1.1, lp], [57, .45, 1.45, lp], [62, .22, .8, lp], [69, 1, .6, top]]) {
+      const k = ac.createGain(), o = ac.createOscillator(), l = ac.createOscillator(), lg = ac.createGain(); k.gain.value = a; k.connect(dst); o.type = 'sine'; o.frequency.value = hz(m);
+      l.frequency.value = vr; lg.base = hz(m) * .004; lg.gain.value = lg.base; l.connect(lg); lg.connect(o.frequency); o.connect(k); o.start(); l.start(); os.push([o, hz(m)]); vib.push(lg);
     }
     for (const [r, dp] of [[2.3, .18], [3.7, .12]]) { const l = ac.createOscillator(), lg = ac.createGain(); l.frequency.value = r; lg.gain.value = dp; l.connect(lg); lg.connect(am.gain); l.start(); }
-    return {g, lp, os, l:0, bt:0, rel:.35};
-  }
-  // bubble micro-glissando: soft rising sine with no attack edge
-  function gl(f, g) {
-    const t = ac.currentTime, v = vout(.4, null, (R() - .5) * .7); f = dt(f);
-    v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g), t + .02); v.gain.setTargetAtTime(0, t + .02, .045);
-    osc('sine', f, t, t + .35, v).frequency.setTargetAtTime(f * 1.25, t, .04);
+    return {g, lp, os, vib, top, pn, sp:0, ag:0, last:-1e9, t0:0, dx:0, dy:0, rel:.4};
   }
   // zoom: soft open fifth whose pitch and brightness follow the zoom level
   function zoomV() {
@@ -255,11 +249,17 @@ const SFX = (() => {
     fuse: ev((x = .5) => { if (!gate('fuse', 40)) return; blp(nt(3 + step(-1)), .075, {pan:(x - .5) * 1.2}); hap(3); }),
     heal: ev(() => { lad = 0; sub(hz(50), .14, {d:.5, dr:1.1}); syn(nt(0), .11, {d:1.1, br:.2}); syn(nt(4), .07, {at:.07, d:1.2, br:.2}); hap([4, 30, 6]); }),
     pull: ev(() => { air(true, .03, {d:.4, wet:.4}); hap(3); }),
-    // finger moving over the screen (home, blob drag, map pan): sp = px/s; heavy = dragging the blob itself (deeper water)
-    stroke: ev((sp, heavy) => { if (recOn) return; const c = cv('wash', washV), l = Math.min(1, sp / 1400), t = ac.currentTime, h = heavy ? .75 : 1, tc = l > c.l ? .1 : .25; c.l = l; // swells in, settles out
-      c.g.gain.setTargetAtTime(.035 * Math.pow(l, .8) * (heavy ? 1.2 : 1), t, tc); c.lp.frequency.setTargetAtTime((250 + 650 * l) * h, t, tc);
-      for (const [o, f] of c.os) o.frequency.setTargetAtTime(f * h * (1 + .12 * l), t, tc);
-      const n = performance.now(); if (l > .15 && n > c.bt) { c.bt = n + 220 - 150 * l + R() * 120; gl(nt(2 + Math.floor(R() * 6)) * h, .006 + .012 * l); } }),
+    // finger on the water, per pointer move: step dx,dy (px) over dtm (ms), x = screen 0..1, heavy = holding the blob, wake = live wake 0..1
+    // speed → loudness/brightness/pitch, acceleration and turns → vibrato depth, gesture time → bloom, wake → shimmer; all smoothed
+    stroke: ev((dx, dy, dtm, x = .5, heavy = false, wake = 0) => { if (recOn) return; const c = cv('wash', washV), t = ac.currentTime, n = performance.now(), d = Math.hypot(dx, dy), sp = d / Math.max(1, dtm) * 1000;
+      if (n - c.last > 250) { c.sp = 0; c.ag = 0; c.t0 = n; c.dx = dx; c.dy = dy; } c.last = n;
+      const turn = c.sp > 50 && sp > 50 ? 1 - (dx * c.dx + dy * c.dy) / (d * Math.hypot(c.dx, c.dy) || 1) : 0; // 0 straight … 2 reversal
+      c.ag += (Math.min(1, Math.abs(sp - c.sp) / 1500 + turn * .5) - c.ag) * .3; c.sp += (sp - c.sp) * Math.min(1, .15 + dtm / 60); c.dx = dx; c.dy = dy;
+      const l = Math.min(1, c.sp / 1400), bloom = Math.min(1, (n - c.t0) / 1200), h = heavy ? .75 : 1;
+      c.g.gain.setTargetAtTime(.035 * Math.pow(l, .8) * (heavy ? 1.2 : 1), t, .12); c.lp.frequency.setTargetAtTime((240 + 500 * l + 300 * bloom) * h, t, .12);
+      for (const [o, f] of c.os) o.frequency.setTargetAtTime(f * h * (1 + .1 * l), t, .15);
+      for (const lg of c.vib) lg.gain.setTargetAtTime(lg.base * (1 + 4 * c.ag), t, .1);
+      c.top.gain.setTargetAtTime(.22 * bloom * (.4 + .6 * wake), t, .3); if (c.pn) c.pn.pan.setTargetAtTime((x - .5) * 1.1, t, .15); }),
     // z = map zoom (0.25..12), dl = ln of this step's zoom factor
     zoom: ev((z, dl) => { const c = cv('zoom', zoomV), k = Math.max(0, Math.min(1, Math.log(z / .25) / Math.log(48))), t = ac.currentTime;
       c.lp.frequency.setTargetAtTime(260 + 2200 * k * k, t, .08); for (const o of c.os) o.detune.setTargetAtTime((k - .4) * 700, t, .1);
@@ -677,7 +677,7 @@ PH.addEventListener('pointerdown', e => {
 });
 const MVL = new Map(); // last position per pointer, for the finger-on-water sound
 window.addEventListener('pointermove', e => {
-  if (e.buttons || e.pointerType === 'touch') { const q = pt(e), nw = performance.now(), l = MVL.get(e.pointerId); if (l && nw > l.t) SFX.stroke(Math.hypot(q.x - l.x, q.y - l.y) / (nw - l.t) * 1000, !!(grabP && grabP.id === e.pointerId)); MVL.set(e.pointerId, {x:q.x, y:q.y, t:nw}); ripMove(e, q, nw); }
+  if (e.buttons || e.pointerType === 'touch') { const q = pt(e), nw = performance.now(), l = MVL.get(e.pointerId); if (l && nw > l.t) SFX.stroke(q.x - l.x, q.y - l.y, nw - l.t, q.x / W, !!(grabP && grabP.id === e.pointerId), TR.length / 48); MVL.set(e.pointerId, {x:q.x, y:q.y, t:nw}); ripMove(e, q, nw); }
   if (MAP.pull && e.pointerId === MAP.pull.id) { const p = pt(e), now = performance.now(), a = clamp((p.y - MAP.pull.y0) / (H * P.mapPullLen), 0, 1); MAP.pull.v = .7 * (a - MAP.a) / Math.max(.001, (now - MAP.pull.t) / 1000) + .3 * MAP.pull.v; MAP.pull.t = now; MAP.a = a; return; }
   if (MAP.on) { mapMove(e); return; }
   if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
@@ -946,6 +946,7 @@ function frame(now) {
   br = .5 - .5 * Math.cos(T * TAU / 5);
   vis = visNow(now);
   const recLike = rec || now < shoutEnd, hold = !!(grabP && pts.has(grabP.id) && grabP.moved > 4); if (grabP) grabP.heldMs = now - grabP.t0;
+  if (hold && !rec) SFX.stretch(clamp(Math.hypot(PX - grabP.x0, PY - grabP.y0) / (RR * 1.4), 0, 1) * .85); // main blob pulled: same soft membrane tension, never at tearing pitch
   const fing = !!(swipe && pts.has(swipe.id));
   cutS += ((fing ? 1 : 0) - cutS) * Math.min(1, dt * (fing ? P.cutIn : P.cutOut));
   if (fing) {

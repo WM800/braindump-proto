@@ -60,7 +60,7 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 // music bus = 0.2 of full scale; Web Audio output is scaled by the device volume, so music is always 20% of what the user set
 const SFX = (() => {
   const AC = window.AudioContext || window.webkitAudioContext, PEN = [0, 2, 4, 7, 9], MUS = .2, R = Math.random;
-  let ac = null, sfx, mus, rv, noise, recOn = false, musOn = true, musNext = 0, musTick = 0, dripT = 0, chordI = 0;
+  let ac = null, sfx, mus, rv, noise, recOn = false, musOn = true, musNext = 0, musTick = 0, chordI = 0;
   const lim = {};
   try { musOn = localStorage.getItem('bd_music') !== '0'; } catch (e) {}
   const hz = m => 440 * Math.pow(2, (m - 69) / 12);
@@ -101,15 +101,13 @@ const SFX = (() => {
     const t = ac.currentTime + (o.at || 0), d = o.d || .085, v = vout(o.wet ?? .18, o.bus), end = env(v, t, .002, vg(g), d);
     const s = osc('sine', f = dt(f), t, end, v); s.frequency.exponentialRampToValueAtTime(f * (o.up || 1.8), t + d * .7);
   }
-  // soft mallet bar (marimba-like): fundamental with a tiny pitch settle, fast 4th partial, felt-tip noise
-  function bar(f, g, o = {}) {
-    const t = ac.currentTime + (o.at || 0), d = o.d || 1.1, b = o.br ?? 1, v = vout(o.wet ?? .3, o.bus), end = env(v, t, .003, vg(g), d);
+  // round synth pluck: triangle + soft octave through a lowpass that closes fast (warm "bloop", no mallet click); br = brightness
+  function syn(f, g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), d = o.d || 1, b = o.br ?? .6, v = vout(o.wet ?? .3, o.bus), end = env(v, t, .005, vg(g), d), lp = ac.createBiquadFilter();
     f = dt(f);
-    const s = osc('sine', f * 1.012, t, end, v); s.frequency.exponentialRampToValueAtTime(f, t + .04);
-    const h = ac.createGain(); h.connect(v); env(h, t, .002, .22 * b, d * .16); osc('sine', f * 3.98, t, t + d * .4, h);
-    if (f * 9.9 < 11000) { const h2 = ac.createGain(); h2.connect(v); env(h2, t, .001, .05 * b, d * .05); osc('sine', f * 9.9, t, t + d * .15, h2); }
-    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = Math.min(6000, f * 3); bp.Q.value = 1.2;
-    const ng = ac.createGain(); env(ng, t, .001, .12 * b, .018); bp.connect(ng); ng.connect(v); nz(t, .05, bp);
+    lp.type = 'lowpass'; lp.Q.value = .8; lp.frequency.setValueAtTime(Math.min(9000, f * (2 + 6 * b)), t); lp.frequency.setTargetAtTime(f * 1.2, t + .005, d * .12); lp.connect(v);
+    const s = osc('triangle', f * 1.008, t, end, lp); s.frequency.exponentialRampToValueAtTime(f, t + .05);
+    const h = ac.createGain(); h.gain.value = .25; h.connect(lp); osc('sine', f * 2, t, end, h);
   }
   // warm low thump; 2nd/3rd harmonics so phone speakers still convey it
   function sub(f, g, o = {}) {
@@ -124,7 +122,7 @@ const SFX = (() => {
     nz(t, d + .02, bp);
   }
 
-  // background music: slow crossfading pad chords + sparse marimba drips, all inside the same key
+  // background music: slow crossfading pad chords only (no plucks), inside the same key
   const CH = [[38, 50, 57, 62, 64, 66], [35, 47, 54, 59, 62, 66], [31, 43, 50, 57, 59, 62], [33, 45, 52, 57, 59, 64]]; // Dmaj9 · Bm11 · Gadd9 · A6sus4 (first = bass root)
   const LEN = 12, FADE = 5;
   function chord(t) {
@@ -137,42 +135,49 @@ const SFX = (() => {
       for (const ct of [-6, 6]) { const g = ac.createGain(); g.gain.value = .045; g.connect(lp); osc('triangle', hz(m) * Math.pow(2, ct / 1200), t, end, g); }
     });
   }
-  function drip() {
-    if (!musOn) return;
-    if (ac.state === 'running') { const i = 2 + Math.floor(R() * 9), n = R() < .3 ? 2 + Math.floor(R() * 2) : 1;
-      for (let k = 0; k < n; k++) bar(nt(i + k * (R() < .5 ? 1 : 2)), .22, {at:k * (.28 + R() * .2), d:1.6, br:.4, wet:0, bus:mus}); }
-    dripT = setTimeout(drip, 2500 + R() * 5500);
-  }
   function musStart() {
     mus.gain.cancelScheduledValues(ac.currentTime); mus.gain.setTargetAtTime(recOn ? MUS * .12 : MUS, ac.currentTime, 1.2);
-    musNext = Math.max(musNext, ac.currentTime + .1); clearInterval(musTick); clearTimeout(dripT);
+    musNext = Math.max(musNext, ac.currentTime + .1); clearInterval(musTick);
     const tick = () => { while (musNext < ac.currentTime + 2) { chord(musNext); musNext += LEN; } };
-    tick(); musTick = setInterval(tick, 1000); dripT = setTimeout(drip, 4000);
+    tick(); musTick = setInterval(tick, 1000);
   }
-  function musStop() { mus.gain.cancelScheduledValues(ac.currentTime); mus.gain.setTargetAtTime(0, ac.currentTime, .4); clearInterval(musTick); clearTimeout(dripT); }
+  function musStop() { mus.gain.cancelScheduledValues(ac.currentTime); mus.gain.setTargetAtTime(0, ac.currentTime, .4); clearInterval(musTick); }
   // duck under the voice while recording (keeps the mic clean)
   function duck(on) { if (musOn) { mus.gain.cancelScheduledValues(ac.currentTime); mus.gain.setTargetAtTime(on ? MUS * .12 : MUS, ac.currentTime, on ? .15 : 1); } }
 
   return {
     unlock: init,
     get music() { return musOn; },
-    toggleMusic: ev(() => { musOn = !musOn; try { localStorage.setItem('bd_music', musOn ? '1' : '0'); } catch (e) {} if (musOn) musStart(); else musStop(); bar(nt(musOn ? 7 : 2), .3, {d:.8}); hap(6); }),
+    toggleMusic: ev(() => { musOn = !musOn; try { localStorage.setItem('bd_music', musOn ? '1' : '0'); } catch (e) {} if (musOn) musStart(); else musStop(); syn(nt(musOn ? 7 : 2), .25, {d:.8}); hap(6); }),
     recStart: ev(() => { recOn = true; duck(true); sub(hz(38), .55, {d:.5}); plop(nt(0), .35, {up:1.5, d:.12, at:.02}); hap(16); }),
     recStop: ev(() => { recOn = false; duck(false); plop(nt(4), .3, {up:2, d:.08}); sub(hz(45), .35, {d:.3, at:.03}); hap([8, 45, 14]); }),
-    saved: ev(() => { [2, 4, 6, 8].forEach((i, k) => bar(nt(i), .26 - k * .03, {at:.06 + k * .075, d:1.4})); sub(hz(50), .3, {at:.04, d:.6}); plop(nt(9), .12, {at:.36}); hap([6, 70, 10]); }),
-    processed: ev(() => { bar(nt(7), .2, {d:1.6}); bar(nt(11), .14, {at:.12, d:1.8, br:.5}); hap(6); }),
-    warn: ev(() => { if (!gate('warn', 2500)) return; bar(nt(-1), .28, {d:.7, br:.3}); bar(nt(-3), .24, {at:.16, d:.9, br:.3}); hap([18, 90, 18]); }),
+    saved: ev(() => { [2, 4, 6, 8].forEach((i, k) => syn(nt(i), .2 - k * .025, {at:.06 + k * .075, d:1.2})); sub(hz(50), .3, {at:.04, d:.6}); plop(nt(9), .12, {at:.36}); hap([6, 70, 10]); }),
+    processed: ev(() => { syn(nt(7), .16, {d:1.4}); syn(nt(11), .1, {at:.12, d:1.6, br:.3}); hap(6); }),
+    warn: ev(() => { if (!gate('warn', 2500)) return; syn(nt(-1), .24, {d:.6, br:.2}); syn(nt(-3), .2, {at:.16, d:.8, br:.2}); hap([18, 90, 18]); }),
     grab: ev(i => { if (!gate('grab', 60)) return; plop(nt(3 + (i % 5)), .16, {up:1.4, d:.05, wet:.05}); hap(4); }),
-    tap: ev(i => { const k = 5 + (i % 7); plop(nt(k), .28, {d:.09}); bar(nt(k), .1, {d:.6, br:.3, at:.01}); hap(6); }),
-    pin: ev(on => { if (on) { sub(hz(50), .4, {d:.35}); bar(nt(5), .26, {d:1.2}); bar(nt(9), .12, {at:.05, d:1.4, br:.5}); hap(14); } else { bar(nt(6), .18, {d:.6}); bar(nt(3), .14, {at:.09, d:.8}); hap(8); } }),
+    tap: ev(i => { const k = 5 + (i % 7); plop(nt(k), .28, {d:.09}); syn(nt(k), .07, {d:.5, br:.2, at:.01}); hap(6); }),
+    pin: ev(on => { if (on) { sub(hz(50), .4, {d:.35}); syn(nt(5), .2, {d:1}); syn(nt(9), .08, {at:.05, d:1.2, br:.3}); hap(14); } else { syn(nt(6), .14, {d:.5}); syn(nt(3), .11, {at:.09, d:.7}); hap(8); } }),
     merge: ev(() => { plop(nt(2), .3, {up:.55, d:.14}); hap(8); }),
-    absorbed: ev(() => { sub(hz(38), .45, {d:.6, dr:1.3}); bar(nt(0), .14, {at:.03, d:1.2, br:.3}); hap([6, 40, 10]); }),
+    absorbed: ev(() => { sub(hz(38), .45, {d:.6, dr:1.3}); syn(nt(0), .1, {at:.03, d:1, br:.2}); hap([6, 40, 10]); }),
+    // contacts: v = closing speed (px/s), r = size (px) — bigger = lower, faster = louder
+    bump: ev((v, r) => { if (v < 25 || !gate('bump', 40)) return; const k = Math.max(1, Math.min(11, 11 - Math.round(r / 3))), g = Math.min(.24, .03 + v / 1400);
+      plop(nt(k), g, {up:1.45, d:.06 + .03 * R(), wet:.2}); syn(nt(k - 5), g * .35, {d:.35, br:.2, wet:.1}); hap(Math.round(3 + g * 30)); }),
+    coreTouch: ev(v => { if (!gate('core', 140)) return; const g = Math.min(.3, .06 + v / 1200); sub(hz(50), g, {d:.3, dr:1.25}); plop(nt(0), g * .5, {up:1.3, d:.1}); hap(6); }),
+    slice: ev(() => { if (!gate('slice', 200)) return; air(true, .035, {d:.25, wet:.15}); hap(4); }),
+    split: ev(n => { if (!gate('split', 60)) return; plop(nt(4 + Math.min(n, 7)), .24, {up:2.2, d:.1}); sub(hz(45), .2, {d:.25, dr:1.8}); hap(10); }),
+    fuse: ev(() => { if (!gate('fuse', 50)) return; plop(nt(3 + Math.floor(R() * 4)), .08, {up:1.4, d:.05, wet:.15}); }),
+    heal: ev(() => { sub(hz(38), .3, {d:.5}); syn(nt(2), .1, {d:.8}); syn(nt(4), .08, {at:.08, d:.9}); plop(nt(7), .08, {at:.15}); hap([5, 30, 8]); }),
+    pull: ev(() => { air(true, .04, {d:.4}); hap(4); }),
+    zoom: ev(inw => { if (!gate('zoom', 70)) return; plop(nt(inw ? 8 : 4), .05, {d:.03, up:1.3, wet:.05}); hap(2); }),
+    // map node drag (not built yet): grab, contact with another node, release
+    nodeGrab: ev(i => { plop(nt(3 + (i % 9)), .14, {up:1.4, d:.06}); hap(5); }),
+    nodeDrop: ev(i => { plop(nt(3 + (i % 9)), .12, {up:.7, d:.08}); sub(hz(50), .12, {d:.2}); hap(6); }),
     splash: ev(() => { if (recOn || !gate('spl', 45)) return; plop(nt(6 + Math.floor(R() * 8)), .07 + R() * .05, {d:.04 + R() * .03, up:1.6 + R() * .8, wet:.25}); }),
     dropBack: ev(() => { if (recOn || !gate('db', 70)) return; plop(nt(4 + Math.floor(R() * 6)), .05, {d:.05, up:1.3, wet:.1}); }),
     toggle: ev(hid => { air(!hid, .05, {d:.5}); plop(nt(hid ? 2 : 5), .12, {at:.18, d:.07}); hap(6); }),
-    mapIn: ev(() => { air(true, .06, {d:.9}); [-5, -3, 0, 2, 4].forEach((i, k) => bar(nt(i), .14, {at:.1 + k * .09, d:1.5, br:.5})); sub(hz(50), .25, {d:.6}); hap(8); }),
-    mapOut: ev(() => { air(false, .06, {d:.8}); [4, 2, 0, -3].forEach((i, k) => bar(nt(i), .13, {at:.05 + k * .08, d:1.3, br:.5})); hap(8); }),
-    node: ev(i => { const k = 3 + (i % 9); bar(nt(k), .2, {d:1}); plop(nt(k + 5), .08, {d:.05, wet:.3}); hap(5); }),
+    mapIn: ev(() => { air(true, .06, {d:.9}); [-5, -3, 0, 2, 4].forEach((i, k) => syn(nt(i), .1, {at:.1 + k * .09, d:1.3, br:.3})); sub(hz(50), .25, {d:.6}); hap(8); }),
+    mapOut: ev(() => { air(false, .06, {d:.8}); [4, 2, 0, -3].forEach((i, k) => syn(nt(i), .09, {at:.05 + k * .08, d:1.1, br:.3})); hap(8); }),
+    node: ev(i => { const k = 3 + (i % 9); syn(nt(k), .15, {d:.9}); plop(nt(k + 5), .08, {d:.05, wet:.3}); hap(5); }),
     fit: ev(() => { air(true, .04, {d:.45}); hap(4); }),
     cut: ev(() => { if (!gate('cut', 80)) return; plop(nt(9 + Math.floor(R() * 3)), .22, {up:.45, d:.07, wet:.3}); sub(hz(62), .15, {d:.12, dr:2}); hap(12); }),
   };
@@ -546,7 +551,7 @@ window.addEventListener('pointermove', e => {
   if (grabP && e.pointerId === grabP.id) { const p = pt(e); grabP.moved = Math.max(grabP.moved, Math.hypot(p.x - grabP.x0, p.y - grabP.y0)); }
   const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
   if (swipe && e.pointerId === swipe.id && swipe.y0 < H * .5 && p.y - swipe.y0 > 24 && Math.abs(p.x - swipe.x0) < (p.y - swipe.y0) * .7) {
-    const id = swipe.id, y0 = swipe.y0 + 24; mapEnter(performance.now(), true); MAP.pull = {id, y0, t:performance.now(), v:0}; swipe = null; return;
+    const id = swipe.id, y0 = swipe.y0 + 24; mapEnter(performance.now(), true); SFX.pull(); MAP.pull = {id, y0, t:performance.now(), v:0}; swipe = null; return;
   }
   if (swipe && e.pointerId === swipe.id) {
     swipe.acc += Math.hypot(p.x - swipe.lx, p.y - swipe.ly); swipe.lx = p.x; swipe.ly = p.y;
@@ -670,7 +675,7 @@ function fracture(now, dt, dts, vol, fing) {
         }
       }
       if (hit) {
-        lastCut = now; cutNow = true;
+        lastCut = now; cutNow = true; SFX.slice();
         const lk = STK[STK.length - 1];
         if (lk && Math.hypot(lk[2] - ux * 3 - lFX, lk[3] - uy * 3 - lFY) < 1) {
           const lx = lk[2] - lk[0], ly = lk[3] - lk[1], ll = Math.hypot(lx, ly) || 1;
@@ -685,7 +690,7 @@ function fracture(now, dt, dts, vol, fing) {
   // heal along a smootherstep curve: starts and lands with zero speed, so the joining never stops with a jolt
   if (cutting) { sepAmt += (1 - sepAmt) * Math.min(1, dt * 12); sepV = 0; }
   else { const hl = clamp(1 - (now - lastCut - P.cutHold * 1000) / (Math.max(.1, P.cutHeal) * 1000), 0, 1); sepAmt = Math.min(sepAmt, hl * hl * hl * (hl * (hl * 6 - 15) + 10)); }
-  if (!cutting && Math.abs(sepAmt) < .004 && Math.abs(sepV) < .02) { sepAmt = 0; sepV = 0; STK.length = 0; nGroups = 1; }
+  if (!cutting && Math.abs(sepAmt) < .004 && Math.abs(sepV) < .02) { if (nGroups > 1) SFX.heal(); sepAmt = 0; sepV = 0; STK.length = 0; nGroups = 1; }
   // groups: fragments are bonded when close and no stroke lies between them
   const n = FR.length;
   for (let i = 0; i < n; i++) { UF[i] = i; const q = FR[i]; q.x = q.c.x + q.ox; q.y = q.c.y + q.oy; q.r = rOf(q); }
@@ -699,7 +704,7 @@ function fracture(now, dt, dts, vol, fing) {
     }
     let ng = 0; const gid = {};
     for (let i = 0; i < n; i++) { const r0 = ufFind(i); if (gid[r0] === undefined) gid[r0] = Math.min(7, ng++); FR[i].g = gid[r0]; }
-    nGroups = Math.max(nGroups, ng);
+    if (ng > nGroups) SFX.split(ng); nGroups = Math.max(nGroups, ng);
   } else if (!STK.length) for (let i = 0; i < n; i++) FR[i].g = 0;
   // fragment motion: loose fluid while cut, pulled home (critically damped) while healing
   kFs += (P.fragK * (cutting ? P.fragLoose : P.fragHealK) - kFs) * Math.min(1, dt * (cutting ? 8 : 3));
@@ -725,7 +730,7 @@ function fracture(now, dt, dts, vol, fing) {
       const m = a.m + b.m, wa = a.m / m, wb = b.m / m;
       b.ox = a.ox * wa + b.ox * wb; b.oy = a.oy * wa + b.oy * wb; b.vx = a.vx * wa + b.vx * wb; b.vy = a.vy * wa + b.vy * wb;
       b.rx = a.rx * wa + b.rx * wb; b.ry = a.ry * wa + b.ry * wb; b.m = m > .999 ? 1 : m; b.x = b.c.x + b.ox; b.y = b.c.y + b.oy; b.r = rOf(b);
-      FR.splice(i, 1); break;
+      SFX.fuse(); FR.splice(i, 1); break;
     }
   }
 }
@@ -1067,6 +1072,7 @@ function frame(now) {
     const A = ORBS[a], B = ORBS[b];
     if (A.x === null || B.x === null || A.state === 'gone' || B.state === 'gone' || A.state === 'leave' || B.state === 'leave') continue;
     const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 1, avgR = (A.r * A.s + B.r * B.s) / 2, dmin = 3.2 * avgR;
+    if (A.state === 'ok' && B.state === 'ok') { const tc = A.tch || (A.tch = new Set()); if (d < 2.3 * avgR) { if (!tc.has(B)) { tc.add(B); SFX.bump(Math.abs(((B.vx - A.vx) * dx + (B.vy - A.vy) * dy) / d) + 40, avgR); } } else if (d > 2.7 * avgR) tc.delete(B); }
     let f = 0;
     if (d < dmin) f = -P.repel * (dmin - d);
     else if (d > 3 * avgR && d < 6 * avgR) f = P.cohesion;
@@ -1080,6 +1086,7 @@ function frame(now) {
     if (o.state === 'ok' || o.state === 'back') {
       o.vx += o.ax * dt; o.vy += o.ay * dt; o.x += o.vx * dt; o.y += o.vy * dt;
       if (!o.pinned) { o.x = clamp(o.x, o.r + 4, W - o.r - 4); o.y = Math.max(o.y, o.r + 14); }
+      if (o.state === 'ok') { const dc = Math.hypot(o.x - CX, o.y - CY), rr = o.r * o.s; if (dc < RR + rr * 1.2) { if (!o.tCore) { o.tCore = 1; SFX.coreTouch(Math.hypot(o.vx, o.vy)); } } else if (dc > RR + rr * 1.8) o.tCore = 0; }
     }
     // tail: second disk lags behind on its own spring -> the orb stretches when it moves
     if (o.qx === null) { o.qx = o.x; o.qy = o.y; }
@@ -1241,6 +1248,7 @@ function mapPhys(dt, settle) {
   for (const n of N) { n.vx = (n.vx + n.ax * dt) * dmp; n.vy = (n.vy + n.ay * dt) * dmp; n.x += n.vx * dt; n.y += n.vy * dt; }
 }
 function mapZoomAt(f, sx, sy) {
+  MAP.zAcc = (MAP.zAcc || 0) + Math.log(f); if (Math.abs(MAP.zAcc) > .12) { SFX.zoom(MAP.zAcc > 0); MAP.zAcc = 0; }
   const c = MAP.cam, z = clamp(c.z * f, .25, 12), wx = (sx - c.x) / c.z, wy = (sy - c.y) / c.z;
   c.z = z; c.x = sx - wx * z; c.y = sy - wy * z; MAP.ct = null;
 }

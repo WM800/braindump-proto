@@ -75,7 +75,7 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapNodeR:1, synW:2.2, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:2.8, mapExit:1.4, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:2.2, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
 try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v31')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
@@ -325,12 +325,12 @@ PH.addEventListener('pointerdown', e => {
   lastEmpty = now;
 });
 window.addEventListener('pointermove', e => {
-  if (MAP.pull && e.pointerId === MAP.pull.id) { const p = pt(e), now = performance.now(), a = clamp((p.y - MAP.pull.y0) / (H * .5), 0, 1) * .45; MAP.pull.v = (a - MAP.a) / Math.max(.001, (now - MAP.pull.t) / 1000); MAP.pull.t = now; MAP.a = a; return; }
+  if (MAP.pull && e.pointerId === MAP.pull.id) { const p = pt(e), now = performance.now(), a = clamp((p.y - MAP.pull.y0) / (H * P.mapPullLen), 0, 1); MAP.pull.v = .7 * (a - MAP.a) / Math.max(.001, (now - MAP.pull.t) / 1000) + .3 * MAP.pull.v; MAP.pull.t = now; MAP.a = a; return; }
   if (MAP.on) { mapMove(e); return; }
   if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
   if (grabP && e.pointerId === grabP.id) { const p = pt(e); grabP.moved = Math.max(grabP.moved, Math.hypot(p.x - grabP.x0, p.y - grabP.y0)); }
   const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
-  if (swipe && e.pointerId === swipe.id && swipe.y0 < H * .35 && p.y - swipe.y0 > 24 && Math.abs(p.x - swipe.x0) < (p.y - swipe.y0) * .7) {
+  if (swipe && e.pointerId === swipe.id && swipe.y0 < H * .5 && p.y - swipe.y0 > 24 && Math.abs(p.x - swipe.x0) < (p.y - swipe.y0) * .7) {
     const id = swipe.id, y0 = swipe.y0 + 24; mapEnter(performance.now(), true); MAP.pull = {id, y0, t:performance.now(), v:0}; swipe = null; return;
   }
   if (swipe && e.pointerId === swipe.id) {
@@ -342,7 +342,7 @@ window.addEventListener('pointermove', e => {
   drag.o.gx = p.x; drag.o.gy = p.y;
 });
 function end(e) {
-  if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = MAP.a > .12 || MAP.pull.v > .5 ? 1 : -1; MAP.pull = null; pts.delete(e.pointerId); return; }
+  if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = (MAP.a > P.mapNoReturn && MAP.pull.v > -1) || MAP.pull.v > 1.5 ? 1 : -1; MAP.pull = null; pts.delete(e.pointerId); return; }
   if (MAP.on) { mapUp(e); return; }
   if (grabP && e.pointerId === grabP.id) {
     if (e.type === 'pointerup' && grabP.moved < (e.pointerType === 'touch' ? 18 : 10) && performance.now() - grabP.t0 < 450) { if (rec) stopRec(); else startRec(); }
@@ -1055,6 +1055,8 @@ function mapMove(e) {
   const p = pt(e), now = performance.now(); MAP.hv = p; MAP.hvT = now; MAP.inT = now;
   if (!MAP.pts.has(e.pointerId)) return;
   MAP.pts.set(e.pointerId, p);
+  const bk = MAP.back2;
+  if (bk && bk.id === e.pointerId) { const a = 1 - clamp((bk.y0 - p.y) / (H * P.mapPullLen), 0, 1); bk.v = .7 * (a - MAP.a) / Math.max(.001, (now - bk.t) / 1000) + .3 * bk.v; bk.t = now; MAP.a = a; return; }
   if (MAP.dir < 0) return;
   if (MAP.pinch && MAP.pts.size >= 2) {
     const [a, b] = [...MAP.pts.values()], pc = MAP.pinch, d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dtm = Math.max(1, now - (pc.t || now - 16));
@@ -1065,13 +1067,15 @@ function mapMove(e) {
   const pn = MAP.pan;
   if (pn && pn.id === e.pointerId) { const dtm = Math.max(1, now - pn.t); MAP.cam.x += p.x - pn.x; MAP.cam.y += p.y - pn.y; MAP.vel = [(p.x - pn.x) / dtm * 600 + MAP.vel[0] * .4, (p.y - pn.y) / dtm * 600 + MAP.vel[1] * .4]; pn.x = p.x; pn.y = p.y; pn.t = now; return; }
   const s = MAP.stroke; if (!s || s.id !== e.pointerId) return;
+  if (!s.cut && s.y0 > H * .55 && s.y0 - p.y > 24 && Math.abs(p.x - s.x0) < (s.y0 - p.y) * .7) { MAP.stroke = null; MAP.back2 = {id:e.pointerId, y0:s.y0 - 24, t:now, v:0}; MAP.dir = 0; MAP.lab = null; return; }
   const dd = Math.hypot(p.x - s.x, p.y - s.y), sp = dd / Math.max(1, now - s.t) * 1000;
   s.moved = Math.max(s.moved, Math.hypot(p.x - s.x0, p.y - s.y0));
-  if (sp > P.mapCutSpeed && dd > 2) mapCut(s.x, s.y, p.x, p.y, now);
+  if (sp > P.mapCutSpeed && dd > 2 && mapCut(s.x, s.y, p.x, p.y, now)) s.cut = true;
   s.x = p.x; s.y = p.y; s.t = now;
 }
 function mapUp(e) {
   const s = MAP.stroke, now = performance.now();
+  if (MAP.back2 && MAP.back2.id === e.pointerId) { MAP.dir = (MAP.a < 1 - P.mapNoReturn && MAP.back2.v < 1) || MAP.back2.v < -1.5 ? -1 : 1; MAP.back2 = null; MAP.pts.delete(e.pointerId); return; }
   if (s && s.id === e.pointerId && e.type === 'pointerup' && MAP.dir > 0) {
     const p = pt(e);
     if (s.moved < 10 && now - s.t0 < 350) {
@@ -1094,6 +1098,7 @@ function segU(ax, ay, bx, by, cx2, cy2, dx, dy) {
   return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : -1;
 }
 function mapCut(x0, y0, x1, y1, now) {
+  let hit = false;
   for (const l of MAP.L) {
     if (l.st !== 'ok' || l.poly.length < 2) continue;
     for (let i = 0; i < l.poly.length - 1; i++) {
@@ -1101,12 +1106,13 @@ function mapCut(x0, y0, x1, y1, now) {
       if (t < 0) continue;
       const u = a[2] + (b[2] - a[2]) * t;
       if (u < .18 || u > .82) break;
-      l.st = 'cut'; l.u = u; l.tc = now;
+      l.st = 'cut'; l.u = u; l.tc = now; hit = true;
       const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.max(1, Math.hypot(dx, dy));
       l.a.vx -= dx / d * 40; l.a.vy -= dy / d * 40; l.b.vx += dx / d * 40; l.b.vy += dy / d * 40;
       break;
     }
   }
+  return hit;
 }
 function mapFrame(now) {
   const dt = clamp((now - MAP.last) / 1000, 0, 1 / 30); MAP.last = now;

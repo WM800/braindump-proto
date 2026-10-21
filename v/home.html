@@ -74,7 +74,7 @@ const P0 = {
   // waves: slow, they stretch shapes instead of moving them
   waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
   // light
-  lightLag:.25, lampH:340, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
+  lightLag:.25, lampH:340, lampZ:70, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
   topY:.05, bottomY:.30, spread:1, yCurve:1, jitter:.04, jitterY:.03, newB:1.35, oldB:.5, homeK:.08, homeRate:.15, homeGap:95, homePull:.02, gapBreath:.2, wander:1.8, stagger:.6, repel:5, cohesion:.15, tailK:40, tailC:8, arriveT:5, leaveT:6, leaveDim:.6, edgeFade:.09, maxThoughts:8, labelGap:22,
   // pin: stays where dropped, slow soft aura + wave
@@ -86,7 +86,7 @@ try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v34')) || {}); }
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
-uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
+uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uLZ,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
 uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
@@ -113,10 +113,11 @@ void main(){
   // while cut, pieces use the per-piece (group-aware) rim from before the voice rework
   if(uSep>0.)edge=mix(edge,(1.-smoothstep(0.,9.,sd))*(1.-smoothstep(1.4,3.,f)),uSep);
   vec3 N=normalize(vec3(-G/gn*edge*.9,1.));
-  // lamp under the finger/cursor: original shading, direction toward the lamp point, its pull fading softly with distance (uLH)
-  vec2 ldv=uLP-p;float ldd=max(length(ldv),1.);vec2 ld=ldv/ldd;float att=1./(1.+ldd*ldd/(uLH*uLH));
+  // lamp under the finger/cursor: a point hovering uLZ px above the surface, so right under it the light comes from above and
+  // spreads evenly over every edge of the joined shape (no pinpoint flip); far away it is the original side light, fading by uLH
+  vec2 ldv=uLP-p;float ldd=length(ldv);vec3 L3=normalize(vec3(ldv,max(uLZ,1.)));vec2 ld=L3.xy;float att=1./(1.+ldd*ldd/(uLH*uLH));
   vec3 Lv=normalize(vec3(ld*.6,.8)),Hv=normalize(Lv+vec3(0.,0.,1.));
-  float side=max(dot(N.xy,ld),0.);
+  float side=max(dot(N,L3),0.);
   float rim=edge*edge*uRim*(.6+uLG*side*side*att)*lwn*(1.-.3*max(uSep,0.));
   float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn*(.4+.6*att);
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
@@ -129,7 +130,7 @@ void main(){
   float e2=1.-smoothstep(1.,uOB,f2);
   // thoughts use the core's own shading scaled by their brightness bw (1 = exactly like the core); pinned = filled lit sphere
   vec3 N2=normalize(vec3(-G2/gn2*e2*.9,1.));
-  float side2=max(dot(N2.xy,ld),0.);
+  float side2=max(dot(N2,L3),0.);
   float pk=f2>0.?pw/f2:0.;
   float body=.039*bw+pk*(.55+.45*sqrt(max(0.,1.-1./max(f2,1.))));
   float rim2=e2*e2*uRim*(.6+1.2*side2*side2*att)*(bw+pk*.5);
@@ -145,7 +146,7 @@ void main(){
     float fb=max(f2-fs,0.),g3=fb+fs/(1.+fs);
     float e3=1.-smoothstep(1.,uOB,g3);
     float tt=min(1.,inversesqrt(max(fs,1e-4)));
-    vec3 N3=normalize(vec3(-G2/gn2*.9*e3*tt,1.));float s3=max(dot(N3.xy,ld),0.);float k3=bw+pk*.5;
+    vec3 N3=normalize(vec3(-G2/gn2*.9*e3*tt,1.));float s3=max(dot(N3,L3),0.);float k3=bw+pk*.5;
     float rim3=e3*e3*uRim*(.6+1.2*s3*s3*att)*k3*mix(1.,uSF,1.-tt);
     float sp3=pow(max(dot(N3,Hv),0.),40.)*.3*e3*(.4+.6*att)*k3;
     c=mix(c1,body+rim3+sp3,m2)+og2*(1.-m2)*.08*bw;}
@@ -200,7 +201,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uLZ','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -310,7 +311,7 @@ const DEV_NAMES = {
   fragMin:'Minimalny rozmiar fragmentu', maxFrags:'Maks. liczba fragmentów', bondR:'Zasięg wiązania', fragK:'Sprężystość fragmentów', fragLoose:'Luz fragmentów', gapK:'Siła zamykania przerwy', contact:'Siła kontaktu', healRate:'Szybkość gojenia', fragHealK:'Siła gojenia fragmentów', healZeta:'Tłumienie gojenia', mergeV:'Próg łączenia (prędkość)', mergeD:'Próg łączenia (odległość)', mergeR:'Promień łączenia', volumeLoss:'Utrata objętości przy łączeniu',
   drops:'Krople włączone (1 = tak)', splashTh:'Próg rozbryzgu', splashRate:'Częstość rozbryzgów', maxDrops:'Maks. liczba kropli', splashSpeedMin:'Min. prędkość rozbryzgu', splashSpeedMax:'Maks. prędkość rozbryzgu', splashSpread:'Rozrzut rozbryzgu', dropMin:'Min. rozmiar kropli', dropMax:'Maks. rozmiar kropli', dropLost:'Szansa zagubienia kropli', dropReturn:'Czas powrotu kropli', splashDelay:'Opóźnienie rozbryzgu', splashFric:'Tarcie kropli', dropLight:'Jasność kropli',
   waveSpeed:'Prędkość fal', waveLen:'Długość fali', waveLife:'Czas życia fali', pinWaveAmp:'Amplituda fali przy pinezce', trailAmp:'Amplituda śladu', trailStep:'Odstęp śladu', landAmp:'Amplituda lądowania', waveKick:'Impuls fali',
-  lightLag:'Opóźnienie światła', lampH:'Wysokość lampy', idleR:'Promień w spoczynku', idleT:'Czas do spoczynku', idleBlend:'Płynność przejścia do spoczynku', wanderAmp:'Zakres błądzenia', wanderSpeed:'Prędkość błądzenia', lightGain:'Wzmocnienie światła', rimBand:'Szerokość obwódki', rimMinPx:'Min. grubość obwódki (px)', rimGain:'Wzmocnienie obwódki', orbBand:'Szerokość pasma kuli', orbLevel:'Poziom kuli', glowI:'Intensywność poświaty',
+  lightLag:'Opóźnienie światła', lampH:'Wysokość lampy', lampZ:'Rozproszenie światła pod kursorem (wysokość punktu)', idleR:'Promień w spoczynku', idleT:'Czas do spoczynku', idleBlend:'Płynność przejścia do spoczynku', wanderAmp:'Zakres błądzenia', wanderSpeed:'Prędkość błądzenia', lightGain:'Wzmocnienie światła', rimBand:'Szerokość obwódki', rimMinPx:'Min. grubość obwódki (px)', rimGain:'Wzmocnienie obwódki', orbBand:'Szerokość pasma kuli', orbLevel:'Poziom kuli', glowI:'Intensywność poświaty',
   topY:'Górna granica myśli', bottomY:'Dolna granica myśli', spread:'Rozrzut myśli', yCurve:'Krzywa wysokości myśli', jitter:'Drganie myśli', jitterY:'Drganie myśli w pionie', newB:'Jasność nowych myśli', oldB:'Jasność starych myśli', homeK:'Siła powrotu do domu', homeRate:'Szybkość powrotu do domu', homeGap:'Odstęp przy powrocie do domu', homePull:'Przyciąganie do domu', gapBreath:'Oddychanie odstępów', wander:'Błądzenie myśli', stagger:'Przesunięcie czasowe myśli', repel:'Odpychanie myśli', cohesion:'Spójność grupy myśli', tailK:'Sprężystość ogona', tailC:'Tłumienie ogona', arriveT:'Czas wejścia myśli', leaveT:'Czas wyjścia myśli', leaveDim:'Przyciemnienie przy wyjściu', edgeFade:'Zanikanie przy krawędzi', maxThoughts:'Maks. liczba myśli na ekranie', labelGap:'Odstęp etykiety od myśli',
   pinHold:'Czas przytrzymania pinezki', pinRim:'Obwódka pinezki', pinInner:'Wnętrze pinezki', pinFric:'Tarcie pinezki', pinPush:'Odpychanie pinezki', auraI:'Intensywność aury', auraScale:'Wielkość aury', auraDur:'Czas trwania aury', dropAnim:'Animacja upuszczenia', birthR:'Promień narodzin', detachK:'Siła oderwania', birthDim:'Przyciemnienie narodzin', birthVol:'Głośność narodzin', birthRefill:'Uzupełnianie po narodzinach',
   mapNodeR:'Wielkość kulek na mapie', mapRepel:'Odpychanie kulek', mapGroupK:'Przyciąganie grup', mapPull:'Przyciąganie do środka', mapDamp:'Tłumienie ruchu mapy', mapDrift:'Dryf mapy', mapPanFric:'Tarcie przesuwania mapy', mapEnter:'Szybkość wejścia w mapę', mapExit:'Szybkość wyjścia z mapy', mapPullLen:'Zasięg przyciągania przy wejściu', mapNoReturn:'Próg punktu bez powrotu', mapCutSpeed:'Próg cięcia synaps', shakeTh:'Czułość wstrząsu',
@@ -323,7 +324,7 @@ const DEV_CATS = [
   ['Palec i cięcie', ['grabPull','grabLoose','fingerR','cutR','cutEase','cutIn','cutOut','scarLife','scarSpeed','scarPush','cutSpeed','cutGap','cutImpulse','cutDrag','cutHold','cutHeal','fingerPush','fingerDrag','fingerFast','tearSpeed','tearCool','fastFlee','orbCutSpeed','orbSplit','orbHeal']],
   ['Fragmenty', ['fragMin','maxFrags','bondR','fragK','fragLoose','gapK','contact','healRate','fragHealK','healZeta','mergeV','mergeD','mergeR','volumeLoss']],
   ['Krople i fale', ['drops','splashTh','splashRate','maxDrops','splashSpeedMin','splashSpeedMax','splashSpread','dropMin','dropMax','dropLost','dropReturn','splashDelay','splashFric','dropLight','waveSpeed','waveLen','waveLife','pinWaveAmp','trailAmp','trailStep','landAmp','waveKick']],
-  ['Światło', ['lightLag','lampH','idleR','idleT','idleBlend','wanderAmp','wanderSpeed','lightGain','rimBand','rimMinPx','rimGain','orbBand','orbLevel','glowI']],
+  ['Światło', ['lightLag','lampH','lampZ','idleR','idleT','idleBlend','wanderAmp','wanderSpeed','lightGain','rimBand','rimMinPx','rimGain','orbBand','orbLevel','glowI']],
   ['Myśli', ['topY','bottomY','spread','yCurve','jitter','jitterY','newB','oldB','homeK','homeRate','homeGap','homePull','gapBreath','wander','stagger','repel','cohesion','tailK','tailC','arriveT','leaveT','leaveDim','edgeFade','maxThoughts','labelGap']],
   ['Pinezki', ['pinHold','pinRim','pinInner','pinFric','pinPush','auraI','auraScale','auraDur','dropAnim','birthR','detachK','birthDim','birthVol','birthRefill']],
   ['Mapa myśli', ['mapNodeR','mapRepel','mapGroupK','mapPull','mapDamp','mapDrift','mapPanFric','mapEnter','mapExit','mapPullLen','mapNoReturn','mapCutSpeed','shakeTh']],
@@ -462,7 +463,7 @@ function draw() {
   g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
   g.uniform1f(L.uRim, rimS * P.rimGain); g.uniform1f(L.uGR, grS);
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uEB, Math.max(1.05, P.rimBand)); g.uniform1f(L.uOB, Math.max(1.05, P.orbBand)); g.uniform1f(L.uMW, Math.max(.5, P.rimMinPx)); g.uniform1f(L.uLG, P.lightGain); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
-  g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH);
+  g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH); g.uniform1f(L.uLZ, P.lampZ);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0); g.uniform2f(L.uSSm, P.synSoftLo, P.synSoftHi);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
   g.drawArrays(g.TRIANGLES, 0, 3);

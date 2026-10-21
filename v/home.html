@@ -140,7 +140,7 @@ void main(){
   // filled synapses = the same shader with a wider edge: where the field is mostly synapse (smooth share fs/f2) the edge band
   // stretches over the whole width and the normal follows a tube profile, so ball and synapse stay one smooth structure
   if(uSF>0.){
-    float wq=smoothstep(uSSm.x,uSSm.y,f2>0.?fs/f2:0.);float ir=inversesqrt(max(f2,1.));
+    float wq=smoothstep(uSSm.x,uSSm.y,f2>0.?fs/f2:0.)*smoothstep(.75,1.15,inversesqrt(max(f2-fs,1e-4)));float ir=inversesqrt(max(f2,1.));
     float e3=1.-smoothstep(1.,uOB,pow(max(f2,1.),1.-wq));
     vec3 N3=normalize(vec3(-G2/gn2*.9*mix(e2,ir,wq),1.));float s3=max(dot(N3.xy,ld),0.);float k3=bw+pk*.5;
     float rim3=e3*e3*uRim*(.6+1.2*s3*s3*att)*k3*mix(1.,uSF,wq*(1.-ir));

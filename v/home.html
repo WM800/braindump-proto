@@ -34,6 +34,8 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 @media (max-width:500px){#dev{left:0;right:0;top:auto;bottom:0;width:auto;max-height:50vh;border-radius:14px 14px 0 0}}
 #dev label{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:6px}
 #dev input{grid-column:1/3;width:100%}
+#dev input[type=search]{margin:8px 0 2px;padding:7px 9px;border:0;border-radius:8px;background:#2a2a2a;color:#ddd;font:12px system-ui,"Segoe UI",sans-serif;outline:none}
+#dev .dc{font:600 10px system-ui,"Segoe UI",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#777;margin:12px 0 4px}
 #dev button{font:11px system-ui,"Segoe UI",sans-serif;color:#ddd;background:#2a2a2a;border:0;border-radius:8px;padding:6px 8px;margin:4px 4px 0 0}
 </style>
 </head>
@@ -286,6 +288,43 @@ const META = Object.keys(P0).map(k => {
   const v = P0[k], mx = INT[k] || (v === 0 ? 1 : v <= 1 ? Math.max(1, v * 3) : v * 3);
   return [k, 0, +mx.toFixed(3), INT[k] ? 1 : +(mx / 200).toPrecision(2)];
 });
+// readable names for the tuning keys (the keys themselves stay as they are in P0)
+const DEV_NAMES = {
+  coreY:'Położenie kuli w pionie', coreScale:'Wielkość kuli', partDrift:'Dryf części kuli', idleSpin:'Obrót w spoczynku', kShape:'Sztywność kształtu', dampR:'Tłumienie ruchu', recLoose:'Luz powrotu do kształtu', kLink:'Siła połączeń', lobeMax:'Maks. wypukłość płatów', recShrink:'Kurczenie przy powrocie', petalMax:'Maks. rozmiar płatków', leashK:'Sprężystość smyczy', sharp:'Ostrość granic (1 = miękko)', smallLight:'Światło małych części',
+  onsetKick:'Siła impulsu przy dźwięku', agcFloor:'Minimalne wzmocnienie', agcPeak:'Szczytowe wzmocnienie', puffK:'Siła pufów', bandPush:'Odpychanie pasmami', toneStretch:'Rozciąganie tonem', shiver:'Drżenie', centerK:'Siła powrotu do środka', lvlAtk:'Narastanie głośności', lvlRel:'Opadanie głośności', bandAtk:'Narastanie pasma', bandRel:'Opadanie pasma', onsetGap:'Odstęp między impulsami', onsetRatio:'Próg wykrycia impulsu', onsetMin:'Minimalna siła impulsu', voiceWave:'Fala głosu', voiceWaveGap:'Odstęp fal głosu', toneSwirl:'Wirowanie tonem', maxStretch:'Maks. rozciągnięcie', followMax:'Maks. podążanie za dźwiękiem',
+  grabPull:'Siła przyciągania palcem', grabLoose:'Luz przy chwytaniu', fingerR:'Promień palca', cutR:'Promień cięcia', cutEase:'Płynność cięcia', cutIn:'Cięcie – wejście', cutOut:'Cięcie – wyjście', scarLife:'Czas życia blizny', scarSpeed:'Prędkość blizny', scarPush:'Odpychanie przez bliznę', cutSpeed:'Próg szybkiego cięcia', cutGap:'Odstęp po cięciu', cutImpulse:'Impuls cięcia', cutDrag:'Opór przy cięciu', cutHold:'Czas trzymania cięcia', cutHeal:'Szybkość zabliźniania', fingerPush:'Siła pchnięcia palcem', fingerDrag:'Opór palca', fingerFast:'Próg szybkiego palca', tearSpeed:'Próg rozerwania', tearCool:'Czas ostygnięcia rozerwania', fastFlee:'Ucieczka przy szybkim ruchu', orbCutSpeed:'Próg cięcia kuli', orbSplit:'Podział kuli', orbHeal:'Gojenie kuli',
+  fragMin:'Minimalny rozmiar fragmentu', maxFrags:'Maks. liczba fragmentów', bondR:'Zasięg wiązania', fragK:'Sprężystość fragmentów', fragLoose:'Luz fragmentów', gapK:'Siła zamykania przerwy', contact:'Siła kontaktu', healRate:'Szybkość gojenia', fragHealK:'Siła gojenia fragmentów', healZeta:'Tłumienie gojenia', mergeV:'Próg łączenia (prędkość)', mergeD:'Próg łączenia (odległość)', mergeR:'Promień łączenia', volumeLoss:'Utrata objętości przy łączeniu',
+  drops:'Krople włączone (1 = tak)', splashTh:'Próg rozbryzgu', splashRate:'Częstość rozbryzgów', maxDrops:'Maks. liczba kropli', splashSpeedMin:'Min. prędkość rozbryzgu', splashSpeedMax:'Maks. prędkość rozbryzgu', splashSpread:'Rozrzut rozbryzgu', dropMin:'Min. rozmiar kropli', dropMax:'Maks. rozmiar kropli', dropLost:'Szansa zagubienia kropli', dropReturn:'Czas powrotu kropli', splashDelay:'Opóźnienie rozbryzgu', splashFric:'Tarcie kropli', dropLight:'Jasność kropli',
+  waveSpeed:'Prędkość fal', waveLen:'Długość fali', waveLife:'Czas życia fali', pinWaveAmp:'Amplituda fali przy pinezce', trailAmp:'Amplituda śladu', trailStep:'Odstęp śladu', landAmp:'Amplituda lądowania', waveKick:'Impuls fali',
+  lightLag:'Opóźnienie światła', lampH:'Wysokość lampy', idleR:'Promień w spoczynku', idleT:'Czas do spoczynku', idleBlend:'Płynność przejścia do spoczynku', wanderAmp:'Zakres błądzenia', wanderSpeed:'Prędkość błądzenia', lightGain:'Wzmocnienie światła', rimBand:'Szerokość obwódki', rimMinPx:'Min. grubość obwódki (px)', rimGain:'Wzmocnienie obwódki', orbBand:'Szerokość pasma kuli', orbLevel:'Poziom kuli', glowI:'Intensywność poświaty',
+  topY:'Górna granica myśli', bottomY:'Dolna granica myśli', spread:'Rozrzut myśli', yCurve:'Krzywa wysokości myśli', jitter:'Drganie myśli', jitterY:'Drganie myśli w pionie', newB:'Jasność nowych myśli', oldB:'Jasność starych myśli', homeK:'Siła powrotu do domu', homeRate:'Szybkość powrotu do domu', homeGap:'Odstęp przy powrocie do domu', homePull:'Przyciąganie do domu', gapBreath:'Oddychanie odstępów', wander:'Błądzenie myśli', stagger:'Przesunięcie czasowe myśli', repel:'Odpychanie myśli', cohesion:'Spójność grupy myśli', tailK:'Sprężystość ogona', tailC:'Tłumienie ogona', arriveT:'Czas wejścia myśli', leaveT:'Czas wyjścia myśli', leaveDim:'Przyciemnienie przy wyjściu', edgeFade:'Zanikanie przy krawędzi', maxThoughts:'Maks. liczba myśli na ekranie', labelGap:'Odstęp etykiety od myśli',
+  pinHold:'Czas przytrzymania pinezki', pinRim:'Obwódka pinezki', pinInner:'Wnętrze pinezki', pinFric:'Tarcie pinezki', pinPush:'Odpychanie pinezki', auraI:'Intensywność aury', auraScale:'Wielkość aury', auraDur:'Czas trwania aury', dropAnim:'Animacja upuszczenia', birthR:'Promień narodzin', detachK:'Siła oderwania', birthDim:'Przyciemnienie narodzin', birthVol:'Głośność narodzin', birthRefill:'Uzupełnianie po narodzinach',
+  mapNodeR:'Wielkość kulek na mapie', mapRepel:'Odpychanie kulek', mapGroupK:'Przyciąganie grup', mapPull:'Przyciąganie do środka', mapDamp:'Tłumienie ruchu mapy', mapDrift:'Dryf mapy', mapPanFric:'Tarcie przesuwania mapy', mapEnter:'Szybkość wejścia w mapę', mapExit:'Szybkość wyjścia z mapy', mapPullLen:'Zasięg przyciągania przy wejściu', mapNoReturn:'Próg punktu bez powrotu', mapCutSpeed:'Próg cięcia synaps', shakeTh:'Czułość wstrząsu',
+  synW:'Grubość synaps', synFill:'Wypełnianie synaps (1 = tak)', synFillI:'Intensywność wypełnienia', synInset:'Odstęp synapsy od krawędzi kulki', synIn:'Siła synaps wchodzących', synOut:'Siła synaps wychodzących', synLen:'Długość synaps', synK:'Sprężystość synaps', synCross:'Przenikanie synaps', synRetract:'Cofanie synaps', synRegrow:'Odrastanie synaps',
+  mapLabelZ:'Próg widoczności etykiet kulek', groupLabelZ:'Próg widoczności nazw grup'
+};
+const DEV_CATS = [
+  ['Kula i rdzeń', ['coreY','coreScale','partDrift','idleSpin','kShape','dampR','recLoose','kLink','lobeMax','recShrink','petalMax','leashK','sharp','smallLight']],
+  ['Dźwięk', ['onsetKick','agcFloor','agcPeak','puffK','bandPush','toneStretch','shiver','centerK','lvlAtk','lvlRel','bandAtk','bandRel','onsetGap','onsetRatio','onsetMin','voiceWave','voiceWaveGap','toneSwirl','maxStretch','followMax']],
+  ['Palec i cięcie', ['grabPull','grabLoose','fingerR','cutR','cutEase','cutIn','cutOut','scarLife','scarSpeed','scarPush','cutSpeed','cutGap','cutImpulse','cutDrag','cutHold','cutHeal','fingerPush','fingerDrag','fingerFast','tearSpeed','tearCool','fastFlee','orbCutSpeed','orbSplit','orbHeal']],
+  ['Fragmenty', ['fragMin','maxFrags','bondR','fragK','fragLoose','gapK','contact','healRate','fragHealK','healZeta','mergeV','mergeD','mergeR','volumeLoss']],
+  ['Krople i fale', ['drops','splashTh','splashRate','maxDrops','splashSpeedMin','splashSpeedMax','splashSpread','dropMin','dropMax','dropLost','dropReturn','splashDelay','splashFric','dropLight','waveSpeed','waveLen','waveLife','pinWaveAmp','trailAmp','trailStep','landAmp','waveKick']],
+  ['Światło', ['lightLag','lampH','idleR','idleT','idleBlend','wanderAmp','wanderSpeed','lightGain','rimBand','rimMinPx','rimGain','orbBand','orbLevel','glowI']],
+  ['Myśli', ['topY','bottomY','spread','yCurve','jitter','jitterY','newB','oldB','homeK','homeRate','homeGap','homePull','gapBreath','wander','stagger','repel','cohesion','tailK','tailC','arriveT','leaveT','leaveDim','edgeFade','maxThoughts','labelGap']],
+  ['Pinezki', ['pinHold','pinRim','pinInner','pinFric','pinPush','auraI','auraScale','auraDur','dropAnim','birthR','detachK','birthDim','birthVol','birthRefill']],
+  ['Mapa myśli', ['mapNodeR','mapRepel','mapGroupK','mapPull','mapDamp','mapDrift','mapPanFric','mapEnter','mapExit','mapPullLen','mapNoReturn','mapCutSpeed','shakeTh']],
+  ['Synapsy', ['synW','synFill','synFillI','synInset','synIn','synOut','synLen','synK','synCross','synRetract','synRegrow']],
+  ['Etykiety', ['mapLabelZ','groupLabelZ']]
+];
+let devQ = '';
+function filterDev() {
+  let cat = null, any = false;
+  for (const el of DEV.children) {
+    if (el.classList.contains('dc')) { if (cat) cat.style.display = any ? '' : 'none'; cat = el; any = false; continue; }
+    if (el.tagName === 'LABEL') { const show = !devQ || el.dataset.s.includes(devQ); el.style.display = show ? '' : 'none'; any = any || show; }
+  }
+  if (cat) cat.style.display = any ? '' : 'none';
+}
 function buildDev() {
   DEV.innerHTML = '';
   const b = (name, fn) => { const x = document.createElement('button'); x.textContent = name; x.onclick = fn; DEV.append(x); };
@@ -293,14 +332,27 @@ function buildDev() {
   b('Reset', () => { Object.assign(P, P0); save(); buildDev(); });
   b('Add thought', () => addThought(performance.now()));
   b('Shout test', () => { shoutEnd = performance.now() + 1200; });
-  for (const [k, mn, mx, st] of META) {
-    const l = document.createElement('label'), s = document.createElement('span'), v = document.createElement('span'), r = document.createElement('input');
-    s.textContent = k; v.textContent = P[k];
-    if (BOOL[k]) { r.type = 'checkbox'; r.checked = !!P[k]; r.addEventListener('change', () => { P[k] = r.checked ? 1 : 0; v.textContent = P[k]; save(); }); }
-    else { r.type = 'range'; r.min = mn; r.max = mx; r.step = st; r.value = P[k];
-    r.addEventListener('input', () => { P[k] = +r.value; v.textContent = P[k]; save(); }); }
-    l.append(s, v, r); DEV.append(l);
+  const q = document.createElement('input'); q.type = 'search'; q.placeholder = 'Szukaj ustawienia…'; q.value = devQ;
+  q.addEventListener('input', () => { devQ = q.value.trim().toLowerCase(); filterDev(); });
+  DEV.append(q);
+  const byKey = Object.fromEntries(META.map(m => [m[0], m]));
+  const cats = DEV_CATS.map(([name, keys]) => [name, keys.filter(k => byKey[k])]);
+  const used = new Set(cats.flatMap(c => c[1]));
+  const rest = META.map(m => m[0]).filter(k => !used.has(k));
+  if (rest.length) cats.push(['Inne', rest]);
+  for (const [cat, keys] of cats) {
+    const h = document.createElement('div'); h.className = 'dc'; h.textContent = cat; DEV.append(h);
+    for (const k of keys) {
+      const [, mn, mx, st] = byKey[k];
+      const l = document.createElement('label'), s = document.createElement('span'), v = document.createElement('span'), r = document.createElement('input');
+      s.textContent = DEV_NAMES[k] || k; v.textContent = P[k]; l.title = k; l.dataset.s = ((DEV_NAMES[k] || '') + ' ' + k).toLowerCase();
+      if (BOOL[k]) { r.type = 'checkbox'; r.checked = !!P[k]; r.addEventListener('change', () => { P[k] = r.checked ? 1 : 0; v.textContent = P[k]; save(); }); }
+      else { r.type = 'range'; r.min = mn; r.max = mx; r.step = st; r.value = P[k];
+      r.addEventListener('input', () => { P[k] = +r.value; v.textContent = P[k]; save(); }); }
+      l.append(s, v, r); DEV.append(l);
+    }
   }
+  filterDev();
 }
 DEV.addEventListener('pointerdown', e => e.stopPropagation());
 DEV.addEventListener('pointermove', e => e.stopPropagation());
@@ -367,6 +419,7 @@ function end(e) {
 window.addEventListener('pointerup', end);
 window.addEventListener('pointercancel', end);
 window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase(), now = performance.now();
   if (k === 'm') { if (MAP.on && MAP.dir > 0) mapExit(now); else if (!MAP.on || MAP.dir < 0) mapEnter(now); } else if (k === 'escape' && MAP.on) mapExit(now); else if (MAP.on) return; else if (k === 't') toggle(now); else if (k === 'd') toggleDev(); else if (k === 'n') addThought(now);
 });

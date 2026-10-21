@@ -294,7 +294,7 @@ const P0 = {
   // finger in thick water: gentle when slow, strong (can split the core) when fast
   fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:4, fragHealK:2.5, healZeta:.38, mergeV:6, mergeD:.6, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
-  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, fps:0, adMin:.55, asHold:1200, coreFollow:.05, grabSharp:9, ripAmp:.6, trlAmp:.55, trlLife:1.4, wkSpeed:85, ripLife:2.4, ripSpeed:170, ripStep:34,
+  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, fps:0, adMin:.55, asHold:1200, ttsEngine:0, coreFollow:.05, grabSharp:9, ripAmp:.6, trlAmp:.55, trlLife:1.4, wkSpeed:85, ripLife:2.4, ripSpeed:170, ripStep:34,
   // light
   lightLag:.25, lampH:340, lampZ:70, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
@@ -507,24 +507,50 @@ function orbPos(o) { return {x:o.x, y:o.y + 40 * (1 - vis)}; }
 
 // ===== speech: the assistant reads thoughts. TTS.speak(text) is the only entry point, so Web Speech can later be swapped for an
 // on-device model (Piper / Kokoro WASM) without touching callers. TTS.level (0..1) drives the "speaking" glow.
+// Local engines (privacy first: nothing leaves the device) live in models/tts/<name>/engine.js on the same origin — contract:
+// default export {init(onProgress) -> Promise, speak(text, lang) -> async iterable of {audio:Float32Array, rate}}. Missing = Web Speech fallback.
+const TTSEN = {kokoro:{st:'no model'}, piper:{st:'no model'}};
+const TTSL = t => (/[ąćęłńóśźż]|\b(nie|się|jest|ale|oraz|dla|czy|że)\b/i.test(t) ? 'pl' : 'en');
+async function ttsLoad(name) {
+  const e = TTSEN[name]; if (e.mod || e.st === 'loading') return e.mod;
+  e.st = 'loading';
+  try { const m = (await import('./models/tts/' + name + '/engine.js')).default; await m.init(p => { e.st = 'downloading ' + Math.round(p * 100) + '%'; }); e.mod = m; e.st = 'ready'; }
+  catch (err) { e.st = 'no model'; e.mod = null; }
+  return e.mod;
+}
 const TTS = (() => {
-  const ss = window.speechSynthesis; let voice = null, speaking = false, pulse = -1e9, lv = 0;
+  const ss = window.speechSynthesis; let voice = null, speaking = false, pulse = -1e9, lv = 0, ctx = null, gen = 0, nextAt = 0;
   const pick = () => {
     const vs = ss ? ss.getVoices().filter(v => /^pl/i.test(v.lang)) : []; if (!vs.length) return null;
     const score = v => (/natural|online|neural|premium|enhanced/i.test(v.name) ? 4 : 0) + (/google|microsoft|apple/i.test(v.name) ? 2 : 0) + (v.localService ? 0 : 1);
     return vs.sort((a, b) => score(b) - score(a))[0];
   };
   if (ss) { ss.onvoiceschanged = () => { voice = pick(); }; voice = pick(); }
+  const order = () => { const k = ['auto', 'kokoro', 'piper', 'webspeech'][P.ttsEngine | 0] || 'auto'; return k === 'auto' ? ['kokoro', 'piper'] : k === 'webspeech' ? [] : [k]; };
+  function web(text) {
+    if (!ss) return; const u = new SpeechSynthesisUtterance(text); u.lang = 'pl-PL'; u.rate = .98; if (voice || (voice = pick())) u.voice = voice;
+    u.onstart = () => { speaking = true; }; u.onend = u.onerror = () => { speaking = false; }; u.onboundary = () => { pulse = performance.now(); };
+    speaking = true; ss.speak(u);
+  }
+  async function local(name, text, id) {
+    const m = TTSEN[name].mod; ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); nextAt = Math.max(nextAt, ctx.currentTime + .05);
+    try {
+      for await (const c of m.speak(text, TTSL(text))) { if (id !== gen) return true; const b = ctx.createBuffer(1, c.audio.length, c.rate); b.copyToChannel(c.audio, 0); const n = ctx.createBufferSource(); n.buffer = b; n.connect(ctx.destination); n.start(nextAt); nextAt += b.duration; }
+      setTimeout(() => { if (id === gen) speaking = false; }, Math.max(0, (nextAt - ctx.currentTime) * 1000)); return true;
+    } catch (err) { return false; }
+  }
   return {
     get speaking() { return speaking; },
     speak(text) {
-      if (!ss || !text) return; ss.cancel();
-      const u = new SpeechSynthesisUtterance(text); u.lang = 'pl-PL'; u.rate = .98; if (voice || (voice = pick())) u.voice = voice;
-      u.onstart = () => { speaking = true; }; u.onend = u.onerror = () => { speaking = false; }; u.onboundary = () => { pulse = performance.now(); };
-      speaking = true; ss.speak(u);
+      if (!text) return; const id = ++gen; if (ss) ss.cancel();
+      const ready = order().find(n => TTSEN[n].mod);
+      if (ready) { speaking = true; local(ready, text, id).then(ok => { if (!ok && id === gen) web(text); }); return; }
+      order().forEach(n => ttsLoad(n)); // first use: try to prepare a local model; Web Speech speaks meanwhile
+      web(text);
     },
-    stop() { if (ss) ss.cancel(); speaking = false; },
-    summary(text) { const t = String(text).split(/(?<=[.!?])s+/).slice(0, 2).join(' '); return t.length > 220 ? t.slice(0, 217) + '…' : t; },
+    stop() { gen++; if (ss) ss.cancel(); speaking = false; },
+    status() { return 'kokoro: ' + TTSEN.kokoro.st + ' · piper: ' + TTSEN.piper.st; },
+    summary(text) { const t = String(text).split(/(?<=[.!?])\s+/).slice(0, 2).join(' '); return t.length > 220 ? t.slice(0, 217) + '…' : t; },
     level(now) { const t = speaking ? .55 + .25 * Math.sin(now * .011) + (now - pulse < 140 ? .2 : 0) : 0; lv += (t - lv) * .2; return lv < .01 ? 0 : lv; },
   };
 })();
@@ -620,7 +646,7 @@ const DEV_NAMES = {
   fps:'Licznik FPS (lewy górny róg)', mapRes:'Rozdzielczość mapy (×DPR)', adMin:'Min. rozdzielczość adaptacyjna', wkSpeed:'Prędkość fal kilwateru', trlAmp:'Siła kilwateru', trlLife:'Czas życia kilwateru', synTear:'Próg zerwania synapsy',
   coreY:'Położenie kuli w pionie', coreScale:'Wielkość kuli', partDrift:'Dryf części kuli', idleSpin:'Obrót w spoczynku', kShape:'Sztywność kształtu', dampR:'Tłumienie ruchu', recLoose:'Luz powrotu do kształtu', kLink:'Siła połączeń', lobeMax:'Maks. wypukłość płatów', recShrink:'Kurczenie przy powrocie', petalMax:'Maks. rozmiar płatków', leashK:'Sprężystość smyczy', sharp:'Ostrość granic (1 = miękko)', smallLight:'Światło małych części',
   onsetKick:'Siła impulsu przy dźwięku', agcFloor:'Minimalne wzmocnienie', agcPeak:'Szczytowe wzmocnienie', puffK:'Siła pufów', bandPush:'Odpychanie pasmami', toneStretch:'Rozciąganie tonem', shiver:'Drżenie', centerK:'Siła powrotu do środka', lvlAtk:'Narastanie głośności', lvlRel:'Opadanie głośności', bandAtk:'Narastanie pasma', bandRel:'Opadanie pasma', onsetGap:'Odstęp między impulsami', onsetRatio:'Próg wykrycia impulsu', onsetMin:'Minimalna siła impulsu', voiceWave:'Fala głosu', voiceWaveGap:'Odstęp fal głosu', toneSwirl:'Wirowanie tonem', maxStretch:'Maks. rozciągnięcie', followMax:'Maks. podążanie za dźwiękiem',
-  grabPull:'Siła przyciągania palcem', asHold:'Przytrzymanie bloba do asystenta (ms)', coreFollow:'Ruch całego bloba za palcem', grabSharp:'Zawężenie chwytanego kawałka', grabLoose:'Luz przy chwytaniu', fingerR:'Promień palca', cutR:'Promień cięcia', cutEase:'Płynność cięcia', cutIn:'Cięcie – wejście', cutOut:'Cięcie – wyjście', scarLife:'Czas życia blizny', scarSpeed:'Prędkość blizny', scarPush:'Odpychanie przez bliznę', cutSpeed:'Próg szybkiego cięcia', cutGap:'Odstęp po cięciu', cutImpulse:'Impuls cięcia', cutDrag:'Opór przy cięciu', cutHold:'Czas trzymania cięcia', cutHeal:'Szybkość zabliźniania', fingerPush:'Siła pchnięcia palcem', fingerDrag:'Opór palca', fingerFast:'Próg szybkiego palca', tearSpeed:'Próg rozerwania', tearCool:'Czas ostygnięcia rozerwania', fastFlee:'Ucieczka przy szybkim ruchu', orbCutSpeed:'Próg cięcia kuli', orbSplit:'Podział kuli', orbHeal:'Gojenie kuli',
+  grabPull:'Siła przyciągania palcem', asHold:'Przytrzymanie bloba do asystenta (ms)', ttsEngine:'Silnik mowy: 0 auto, 1 Kokoro, 2 Piper, 3 Web Speech', coreFollow:'Ruch całego bloba za palcem', grabSharp:'Zawężenie chwytanego kawałka', grabLoose:'Luz przy chwytaniu', fingerR:'Promień palca', cutR:'Promień cięcia', cutEase:'Płynność cięcia', cutIn:'Cięcie – wejście', cutOut:'Cięcie – wyjście', scarLife:'Czas życia blizny', scarSpeed:'Prędkość blizny', scarPush:'Odpychanie przez bliznę', cutSpeed:'Próg szybkiego cięcia', cutGap:'Odstęp po cięciu', cutImpulse:'Impuls cięcia', cutDrag:'Opór przy cięciu', cutHold:'Czas trzymania cięcia', cutHeal:'Szybkość zabliźniania', fingerPush:'Siła pchnięcia palcem', fingerDrag:'Opór palca', fingerFast:'Próg szybkiego palca', tearSpeed:'Próg rozerwania', tearCool:'Czas ostygnięcia rozerwania', fastFlee:'Ucieczka przy szybkim ruchu', orbCutSpeed:'Próg cięcia kuli', orbSplit:'Podział kuli', orbHeal:'Gojenie kuli',
   fragMin:'Minimalny rozmiar fragmentu', maxFrags:'Maks. liczba fragmentów', bondR:'Zasięg wiązania', fragK:'Sprężystość fragmentów', fragLoose:'Luz fragmentów', gapK:'Siła zamykania przerwy', contact:'Siła kontaktu', healRate:'Szybkość gojenia', fragHealK:'Siła gojenia fragmentów', healZeta:'Tłumienie gojenia', mergeV:'Próg łączenia (prędkość)', mergeD:'Próg łączenia (odległość)', mergeR:'Promień łączenia', volumeLoss:'Utrata objętości przy łączeniu',
   drops:'Krople włączone (1 = tak)', splashTh:'Próg rozbryzgu', splashRate:'Częstość rozbryzgów', maxDrops:'Maks. liczba kropli', splashSpeedMin:'Min. prędkość rozbryzgu', splashSpeedMax:'Maks. prędkość rozbryzgu', splashSpread:'Rozrzut rozbryzgu', dropMin:'Min. rozmiar kropli', dropMax:'Maks. rozmiar kropli', dropLost:'Szansa zagubienia kropli', dropReturn:'Czas powrotu kropli', splashDelay:'Opóźnienie rozbryzgu', splashFric:'Tarcie kropli', dropLight:'Jasność kropli',
   waveSpeed:'Prędkość fal', waveLen:'Długość fali', waveLife:'Czas życia fali', pinWaveAmp:'Amplituda fali przy pinezce', trailAmp:'Amplituda śladu', trailStep:'Odstęp śladu', landAmp:'Amplituda lądowania', waveKick:'Impuls fali',
@@ -634,7 +660,7 @@ const DEV_NAMES = {
 const DEV_CATS = [
   ['Kula i rdzeń', ['coreY','coreScale','partDrift','idleSpin','kShape','dampR','recLoose','kLink','lobeMax','recShrink','petalMax','leashK','sharp','smallLight']],
   ['Dźwięk', ['onsetKick','agcFloor','agcPeak','puffK','bandPush','toneStretch','shiver','centerK','lvlAtk','lvlRel','bandAtk','bandRel','onsetGap','onsetRatio','onsetMin','voiceWave','voiceWaveGap','toneSwirl','maxStretch','followMax']],
-  ['Palec i cięcie', ['asHold','grabPull','coreFollow','grabSharp','grabLoose','fingerR','cutR','cutEase','cutIn','cutOut','scarLife','scarSpeed','scarPush','cutSpeed','cutGap','cutImpulse','cutDrag','cutHold','cutHeal','fingerPush','fingerDrag','fingerFast','tearSpeed','tearCool','fastFlee','orbCutSpeed','orbSplit','orbHeal']],
+  ['Palec i cięcie', ['asHold','ttsEngine','grabPull','coreFollow','grabSharp','grabLoose','fingerR','cutR','cutEase','cutIn','cutOut','scarLife','scarSpeed','scarPush','cutSpeed','cutGap','cutImpulse','cutDrag','cutHold','cutHeal','fingerPush','fingerDrag','fingerFast','tearSpeed','tearCool','fastFlee','orbCutSpeed','orbSplit','orbHeal']],
   ['Fragmenty', ['fragMin','maxFrags','bondR','fragK','fragLoose','gapK','contact','healRate','fragHealK','healZeta','mergeV','mergeD','mergeR','volumeLoss']],
   ['Krople i fale', ['drops','splashTh','splashRate','maxDrops','splashSpeedMin','splashSpeedMax','splashSpread','dropMin','dropMax','dropLost','dropReturn','splashDelay','splashFric','dropLight','waveSpeed','waveLen','waveLife','pinWaveAmp','trailAmp','trailStep','landAmp','waveKick']],
   ['Światło', ['lightLag','lampH','lampZ','idleR','idleT','idleBlend','wanderAmp','wanderSpeed','lightGain','rimBand','rimMinPx','rimGain','orbBand','orbLevel','glowI']],
@@ -981,7 +1007,7 @@ const FPSE = $('#fps'); let fpsN = 0, fpsT = 0, fpsMax = 0, fpsLast = 0;
 function fpsTick(now) {
   if (!P.fps) { if (FPSE.style.display) FPSE.style.display = ''; return; }
   FPSE.style.display = 'block'; const dt = now - fpsLast; fpsLast = now; fpsN++; if (dt < 1000) fpsMax = Math.max(fpsMax, dt);
-  if (now - fpsT > 500) { FPSE.textContent = Math.round(fpsN * 1000 / (now - fpsT)) + ' fps · worst ' + Math.round(fpsMax) + ' ms · res ' + (adScale * resScale).toFixed(2); fpsN = 0; fpsT = now; fpsMax = 0; }
+  if (now - fpsT > 500) { FPSE.textContent = Math.round(fpsN * 1000 / (now - fpsT)) + ' fps · worst ' + Math.round(fpsMax) + ' ms · res ' + (adScale * resScale).toFixed(2) + ' · tts ' + TTS.status(); fpsN = 0; fpsT = now; fpsMax = 0; }
 }
 // adaptive resolution: the field shader is fill-rate bound, so when frames run well under the display's rate the canvas renders fewer pixels (never rises again, no flapping)
 let adEma = 16, adMin = 1e9, adT = 0, adLast = 0;

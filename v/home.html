@@ -257,7 +257,7 @@ const SFX = (() => {
     pull: ev(() => { air(true, .03, {d:.4, wet:.4}); hap(3); }),
     // finger moving over the screen (home, blob drag, map pan): sp = px/s; heavy = dragging the blob itself (deeper water)
     stroke: ev((sp, heavy) => { if (recOn) return; const c = cv('wash', washV), l = Math.min(1, sp / 1400), t = ac.currentTime, h = heavy ? .75 : 1, tc = l > c.l ? .1 : .25; c.l = l; // swells in, settles out
-      c.g.gain.setTargetAtTime(.05 * Math.pow(l, .8) * (heavy ? 1.2 : 1), t, tc); c.lp.frequency.setTargetAtTime((250 + 650 * l) * h, t, tc);
+      c.g.gain.setTargetAtTime(.035 * Math.pow(l, .8) * (heavy ? 1.2 : 1), t, tc); c.lp.frequency.setTargetAtTime((250 + 650 * l) * h, t, tc);
       for (const [o, f] of c.os) o.frequency.setTargetAtTime(f * h * (1 + .12 * l), t, tc);
       const n = performance.now(); if (l > .15 && n > c.bt) { c.bt = n + 220 - 150 * l + R() * 120; gl(nt(2 + Math.floor(R() * 6)) * h, .006 + .012 * l); } }),
     // z = map zoom (0.25..12), dl = ln of this step's zoom factor

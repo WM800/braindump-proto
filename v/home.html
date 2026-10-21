@@ -48,7 +48,7 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
   <div id="mlab"></div>
   <div id="mback">↑ home</div>
   <div id="mnote"></div>
-  <div id="mhint">two fingers to move and zoom · double-tap or shake to reset</div>
+  <div id="mhint">two fingers to move, zoom and go home · drag a blob, it springs back · double-tap or shake to reset</div>
   <div id="hint">double-tap to hide thoughts</div>
   <div id="msg"></div>
   <div id="mic">mic off</div>
@@ -184,6 +184,7 @@ const SFX = (() => {
 
   return {
     unlock: init,
+    tear() {}, snapBack() {}, ripple() {}, // hooks for the sound session: blob torn from its place / sprung back / background ripple born
     get music() { return musOn; },
     toggleMusic: ev(() => { musOn = !musOn; try { localStorage.setItem('bd_music', musOn ? '1' : '0'); } catch (e) {} if (musOn) musStart(); else musStop(); syn(nt(musOn ? 7 : 2), .25, {d:.8}); hap(6); }),
     recStart: ev(() => { recOn = true; duck(true); sub(hz(38), .55, {d:.5}); plop(nt(0), .35, {up:1.5, d:.12, at:.02}); hap(16); }),
@@ -242,7 +243,7 @@ const P0 = {
   // finger in thick water: gentle when slow, strong (can split the core) when fast
   fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:4, fragHealK:2.5, healZeta:.38, mergeV:6, mergeD:.6, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
-  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0,
+  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, ripAmp:1, ripLife:2.4, ripSpeed:170, ripStep:34,
   // light
   lightLag:.25, lampH:340, lampZ:70, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
@@ -250,16 +251,16 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, synSoftLo:.25, synSoftHi:.85, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, synSoftLo:.25, synSoftHi:.85, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:3.5, mapRest:6, mapDragK:16, mapDragMax:80, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
 try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v34')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
 uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uLZ,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
-uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
+uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];uniform vec4 uR[12];
 void main(){
-  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
+  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;vec2 p0=p;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
   float f=0.;vec2 G=vec2(0.);float lw=0.;
   vec2 GS=vec2(0.);vec4 fA=vec4(0.),fB=vec4(0.),xA=vec4(0.),yA=vec4(0.),xB=vec4(0.),yB=vec4(0.);
@@ -322,6 +323,10 @@ void main(){
     c=mix(c1,body+rim3+sp3,m2)+og2*(1.-m2)*.08*bw;}
   for(int i=0;i<4;i++){vec4 g=uGlow[i];if(g.w<=0.)continue;float d=length(p-g.xy);c+=g.w*(exp(-d/g.z)+.12*exp(-d/(5.*g.z)));}
   if(uAura.w>0.){float d=length(p-uAura.xy);c+=uAura.w*(exp(-d/uAura.z)+.12*exp(-d/(5.*uAura.z)));}
+  // liquid film over the whole background: finger-born rings, lit from the upper left by the slope of the surface (no darkening, so text stays clear)
+  float rg=0.;for(int i=0;i<12;i++){vec4 r=uR[i];if(r.w<=0.)continue;vec2 dv=p0-r.xy;float d=max(length(dv),1.);float x=(d-r.z)/34.;float e=exp(-x*x*1.4);float s=6.2832*x;
+    rg+=r.w*e*(6.2832*cos(s)-2.8*x*sin(s))*dot(dv/d,vec2(-.7071,-.7071))/34.*inversesqrt(1.+d*.012);}
+  c+=clamp(rg,0.,1.)*.75*(1.-.75*max(m,m2));
   gl_FragColor=vec4(vec3(c),1.);
 }`;
 
@@ -339,7 +344,7 @@ const QX = {p:0, v:0}, QY = {p:0, v:0};
 let LP = [0, 0], PX = 0, PY = 0, lPX = 0, lPY = 0, lastIn = -1e9, LD = [1, 0], CX = 0, CY = 0, RR = 72, psp = 0, FVX = 0, FVY = 0;
 let drag = null, swipe = null, pts = new Map(), lastEmpty = -1e9, hidden = false, visFrom = 1, visTo = 1, visStart = -1e9, vis = 1;
 let textOrb = null, textShowT = -1e9, dropPulseT = -1e9, corner = [], SEQ = 0;
-let cornerL = [];
+let cornerL = [], two = null; // two: two-finger gesture on home (tap = hide thoughts, swipe down = thought map)
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = (() => { let s = 11; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
 const hsh = i => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return (s - Math.floor(s)) * 2 - 1; };
@@ -363,7 +368,7 @@ const ORBS = TEXTS.map(t => mkOrb(t));
 
 function makeView() {
   const cv = document.getElementById('gl'), g = cv.getContext('webgl', {alpha:false, antialias:false});
-  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(224), PN:new Float32Array(28), S:new Float32Array(160), SR:new Float32Array(80), NS:0, GL:new Float32Array(16), AU:new Float32Array([0, 0, 1, 0]), WU:new Float32Array(24)};
+  const v = {cv, gl:g, L:{}, B:new Float32Array(160), M:new Float32Array(224), PN:new Float32Array(28), S:new Float32Array(160), SR:new Float32Array(80), NS:0, GL:new Float32Array(16), AU:new Float32Array([0, 0, 1, 0]), WU:new Float32Array(24), R:new Float32Array(48)};
   if (!g) return v;
   const sh = (t, s) => { const o = g.createShader(t); g.shaderSource(o, s); g.compileShader(o); if (!g.getShaderParameter(o, g.COMPILE_STATUS)) console.error(g.getShaderInfoLog(o)); return o; };
   const pr = g.createProgram();
@@ -372,7 +377,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uLZ','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uLZ','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uR','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
@@ -444,6 +449,27 @@ function visNow(now) { return visFrom + (visTo - visFrom) * ease(clamp((now - vi
 const pt = e => { const r = PH.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
 function orbPos(o) { return {x:o.x, y:o.y + 40 * (1 - vis)}; }
 
+// liquid ripples on the background (both screens): rings born under a moving finger, fading as they spread
+const RP = [];
+function addRip(x, y, amp) {
+  if (RP.length >= 12) RP.shift();
+  RP.push({x, y, amp, t0:performance.now()}); SFX.ripple(amp);
+}
+function ripUpload(now) {
+  const R = HV.R; R.fill(0);
+  for (let i = RP.length - 1; i >= 0; i--) {
+    const q = RP[i], u = (now - q.t0) / 1000 / P.ripLife;
+    if (u >= 1) { RP.splice(i, 1); continue; }
+  }
+  RP.forEach((q, i) => { const u = (now - q.t0) / 1000 / P.ripLife; R.set([q.x, q.y, P.ripSpeed * u * P.ripLife + 6, q.amp * P.ripAmp * (1 - u) * (1 - u)], i * 4); });
+}
+const RPL = new Map(); // per pointer: distance travelled since the last ring
+function ripMove(e, q, nw) {
+  const l = RPL.get(e.pointerId);
+  if (!l) { RPL.set(e.pointerId, {x:q.x, y:q.y, t:nw, acc:0}); return; }
+  const dd = Math.hypot(q.x - l.x, q.y - l.y), sp = dd / Math.max(1, nw - l.t) * 1000; l.x = q.x; l.y = q.y; l.t = nw; l.acc += dd;
+  if (l.acc > P.ripStep) { l.acc = 0; addRip(q.x, q.y, clamp(.35 + sp / 900, .35, 1)); }
+}
 // waves: expanding rings that bend space (shader) and nudge every particle they pass
 function addWave(x, y, amp) {
   if (WV.length >= 6) WV.shift();
@@ -567,11 +593,12 @@ DEV.addEventListener('pointerup', e => e.stopPropagation());
 PH.addEventListener('pointerdown', e => {
   SFX.unlock();
   const p = pt(e), now = performance.now();
+  RPL.set(e.pointerId, {x:p.x, y:p.y, t:now, acc:0}); if (!(p.x < 56 && p.y < 56) && !(p.x > W - 56 && p.y < 56)) addRip(p.x, p.y, .8);
   if (p.x < 56 && p.y < 56) { cornerL = cornerL.filter(t => now - t < 900); cornerL.push(now); if (cornerL.length >= 3) { cornerL = []; SFX.toggleMusic(); } return; }
   if (p.x > W - 56 && p.y < 56) { corner = corner.filter(t => now - t < 900); corner.push(now); if (corner.length >= 3) { corner = []; toggleDev(); } return; }
   if (MAP.on) { mapDown(e, p, now); return; }
   pts.set(e.pointerId, p); PX = p.x; PY = p.y; lPX = p.x; lPY = p.y; lastIn = now;
-  if (pts.size === 2) { if (drag) { drag.o.grab = false; clearTimeout(drag.lp); drag = null; } swipe = null; toggle(now); return; }
+  if (pts.size === 2) { if (drag) { drag.o.grab = false; clearTimeout(drag.lp); drag = null; } swipe = null; const v = [...pts.values()]; two = {t0:now, mx0:(v[0].x + v[1].x) / 2, my0:(v[0].y + v[1].y) / 2, moved:0, nav:false}; return; }
   if (vis > .5 && !hidden) {
     for (const o of ORBS) {
       if (o.state !== 'ok') continue;
@@ -590,14 +617,15 @@ PH.addEventListener('pointerdown', e => {
 });
 const MVL = new Map(); // last position per pointer, for the finger-on-water sound
 window.addEventListener('pointermove', e => {
-  if (e.buttons || e.pointerType === 'touch') { const q = pt(e), nw = performance.now(), l = MVL.get(e.pointerId); if (l && nw > l.t) SFX.stroke(Math.hypot(q.x - l.x, q.y - l.y) / (nw - l.t) * 1000, !!(grabP && grabP.id === e.pointerId)); MVL.set(e.pointerId, {x:q.x, y:q.y, t:nw}); }
+  if (e.buttons || e.pointerType === 'touch') { const q = pt(e), nw = performance.now(), l = MVL.get(e.pointerId); if (l && nw > l.t) SFX.stroke(Math.hypot(q.x - l.x, q.y - l.y) / (nw - l.t) * 1000, !!(grabP && grabP.id === e.pointerId)); MVL.set(e.pointerId, {x:q.x, y:q.y, t:nw}); ripMove(e, q, nw); }
   if (MAP.pull && e.pointerId === MAP.pull.id) { const p = pt(e), now = performance.now(), a = clamp((p.y - MAP.pull.y0) / (H * P.mapPullLen), 0, 1); MAP.pull.v = .7 * (a - MAP.a) / Math.max(.001, (now - MAP.pull.t) / 1000) + .3 * MAP.pull.v; MAP.pull.t = now; MAP.a = a; return; }
   if (MAP.on) { mapMove(e); return; }
   if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
   if (grabP && e.pointerId === grabP.id) { const p = pt(e); grabP.moved = Math.max(grabP.moved, Math.hypot(p.x - grabP.x0, p.y - grabP.y0)); }
   const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
-  if (swipe && e.pointerId === swipe.id && swipe.y0 < H * .5 && p.y - swipe.y0 > 24 && Math.abs(p.x - swipe.x0) < (p.y - swipe.y0) * .7) {
-    const id = swipe.id, y0 = swipe.y0 + 24; mapEnter(performance.now(), true); SFX.pull(); MAP.pull = {id, y0, t:performance.now(), v:0}; swipe = null; return;
+  if (two && pts.size === 2) {
+    const v = [...pts.values()], mx = (v[0].x + v[1].x) / 2, my = (v[0].y + v[1].y) / 2; two.moved = Math.max(two.moved, Math.hypot(mx - two.mx0, my - two.my0));
+    if (!two.nav && two.my0 < H * .6 && my - two.my0 > 24 && Math.abs(mx - two.mx0) < (my - two.my0) * .7) { two.nav = true; mapEnter(performance.now(), true); SFX.pull(); MAP.pull = {id:e.pointerId, y0:p.y, t:performance.now(), v:0}; return; }
   }
   if (swipe && e.pointerId === swipe.id) {
     swipe.acc += Math.hypot(p.x - swipe.lx, p.y - swipe.ly); swipe.lx = p.x; swipe.ly = p.y;
@@ -607,15 +635,16 @@ window.addEventListener('pointermove', e => {
   drag.moved = Math.max(drag.moved, Math.hypot(p.x - drag.x0, p.y - drag.y0));
   drag.o.gx = p.x; drag.o.gy = p.y;
 });
+const now0 = () => performance.now();
 function end(e) {
-  MVL.delete(e.pointerId);
+  MVL.delete(e.pointerId); RPL.delete(e.pointerId);
   if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = (MAP.a > P.mapNoReturn && MAP.pull.v > -1) || MAP.pull.v > 1.5 ? 1 : -1; if (MAP.dir > 0) SFX.mapIn(); MAP.pull = null; pts.delete(e.pointerId); return; }
   if (MAP.on) { mapUp(e); return; }
   if (grabP && e.pointerId === grabP.id) {
     if (e.type === 'pointerup' && grabP.moved < (e.pointerType === 'touch' ? 18 : 10) && performance.now() - grabP.t0 < 450) { if (rec) stopRec(); else startRec(); }
     grabP = null;
   }
-  // pull down from the upper third = thought map
+  if (two) { if (!two.nav && two.moved < 14 && now0() - two.t0 < 500) toggle(now0()); two = null; }
   if (swipe && e.pointerId === swipe.id) swipe = null;
   pts.delete(e.pointerId);
   if (!drag || e.pointerId !== drag.id) return;
@@ -650,6 +679,7 @@ function draw() {
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH); g.uniform1f(L.uLZ, P.lampZ);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0); g.uniform2f(L.uSSm, P.synSoftLo, P.synSoftHi);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
+  ripUpload(performance.now()); g.uniform4fv(L.uR, HV.R);
   g.drawArrays(g.TRIANGLES, 0, 3);
 }
 
@@ -1251,6 +1281,8 @@ function mapBuild() {
     const mx = Math.max(1, ...M.map(n => n.sd)); for (const n of M) n.ord = n.seed ? n.sd / mx : Math.abs(hsh(N.indexOf(n) * 3.7)) * .6;
   }
   for (let s = 0; s < 300; s++) mapPhys(1 / 60, true);
+  for (const n of N) { n.rx = n.x; n.ry = n.y; }
+  for (const l of MAP.L) l.d0 = Math.max(1, Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y));
   // group labels
   MAP.lay.innerHTML = '';
   for (const G of groups) { const d = document.createElement('div'); d.className = 'g'; d.textContent = G.name; MAP.lay.append(d); G.el = d; }
@@ -1266,10 +1298,10 @@ function mapEnter(now, manual) {
   if (MAP.on) { MAP.dir = manual ? 0 : 1; return; }
   mapBuild(); MAP.cam = mapFit(); MAP.ct = null; MAP.vel = [0, 0];
   MAP.on = true; MAP.dir = manual ? 0 : 1; MAP.a = 0; MAP.stroke = null; MAP.last = now; MAP.lp = [W / 2, H * .45]; MAP.lab = null; MAP.pts.clear(); MAP.pinch = null; MAP.pan = null;
-  drag = null; swipe = null; grabP = null; pts.clear(); NOTE.classList.remove('on');
+  drag = null; swipe = null; grabP = null; two = null; MAP.dn = null; pts.clear(); NOTE.classList.remove('on');
   MAP.hint.classList.add('on'); setTimeout(() => MAP.hint.classList.remove('on'), 3200);
 }
-function mapExit(now) { MAP.dir = -1; MAP.lab = null; MAP.pinch = null; MAP.pan = null; MAP.ct = null; MAP.hint.classList.remove('on'); SFX.mapOut(); }
+function mapExit(now) { MAP.dir = -1; MAP.lab = null; MAP.pinch = null; MAP.pan = null; MAP.dn = null; MAP.ct = null; MAP.hint.classList.remove('on'); SFX.mapOut(); }
 function mapPhys(dt, settle) {
   const N = MAP.N, G = MAP.G;
   for (const g of G) { g.cx = 0; g.cy = 0; g.n = 0; }
@@ -1279,6 +1311,15 @@ function mapPhys(dt, settle) {
     const g = G[n.gi];
     n.ax = (g.x - n.x) * P.mapPull + (g.cx - n.x) * P.mapGroupK + (settle ? 0 : P.mapDrift * vnoise(T * .12 + n.ph * 3));
     n.ay = (g.y - n.y) * P.mapPull + (g.cy - n.y) * P.mapGroupK + (settle ? 0 : P.mapDrift * vnoise(T * .1 + n.ph * 5 + 9));
+    if (!settle && n.rx !== undefined) { n.ax += (n.rx - n.x) * P.mapRest; n.ay += (n.ry - n.y) * P.mapRest; }
+  }
+  const dn = !settle && MAP.dn;
+  if (dn) {
+    // the finger pulls through a rubber band: the farther it goes the less the blob follows, while synapses and the rest spring pull back harder
+    const n = dn.n, c = MAP.cam, tx = (dn.gx - c.x) / c.z + dn.ox, ty = (dn.gy - c.y) / c.z + dn.oy, dx = tx - n.x, dy = ty - n.y, m = Math.max(.01, Math.hypot(dx, dy)), lim = Math.max(10, P.mapDragMax), e = lim * Math.tanh(m / lim);
+    n.ax += dx / m * e * P.mapDragK; n.ay += dy / m * e * P.mapDragK;
+    dn.str = Math.hypot(n.x - n.rx, n.y - n.ry); dn.maxStr = Math.max(dn.maxStr, dn.str);
+    if (!dn.tore && dn.str > lim * .7) { dn.tore = true; SFX.tear(); }
   }
   for (let i = 0; i < N.length; i++) for (let j = i + 1; j < N.length; j++) {
     const A = N[i], B = N[j], dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy;
@@ -1318,11 +1359,16 @@ function mapDown(e, p, now) {
   MAP.vel = [0, 0]; MAP.ct = null;
   if (MAP.pts.size === 2) {
     const [a, b] = [...MAP.pts.values()];
-    MAP.pinch = {d:Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), mx:(a.x + b.x) / 2, my:(a.y + b.y) / 2}; MAP.pan = null; MAP.stroke = null; return;
+    MAP.pinch = {d:Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), mx:(a.x + b.x) / 2, my:(a.y + b.y) / 2}; MAP.pinch.mx0 = MAP.pinch.mx; MAP.pinch.my0 = MAP.pinch.my; MAP.pinch.d0 = MAP.pinch.d; MAP.pan = null; MAP.stroke = null; MAP.dn = null; return;
   }
   if (MAP.pts.size !== 1) return;
   if (e.pointerType === 'mouse' && e.button === 2) MAP.pan = {id:e.pointerId, x:p.x, y:p.y, t:now};
-  else MAP.stroke = {id:e.pointerId, x:p.x, y:p.y, t:now, x0:p.x, y0:p.y, t0:now, moved:0};
+  else {
+    MAP.stroke = {id:e.pointerId, x:p.x, y:p.y, t:now, x0:p.x, y0:p.y, t0:now, moved:0};
+    let hit = null, bd = 1e9;
+    if (MAP.a >= .95) for (const n of MAP.N) { const q = w2s(n.x, n.y), d = Math.hypot(p.x - q[0], p.y - q[1]) - n.r * MAP.cam.z; if (d < bd) { bd = d; hit = n; } }
+    if (hit && bd < (e.pointerType === 'touch' ? 20 : 8)) { const c = MAP.cam; MAP.dn = {id:e.pointerId, n:hit, ox:hit.x - (p.x - c.x) / c.z, oy:hit.y - (p.y - c.y) / c.z, gx:p.x, gy:p.y, str:0, maxStr:0, tore:false}; MAP.stroke.nocut = true; }
+  }
 }
 function mapMove(e) {
   const p = pt(e), now = performance.now(); MAP.hv = p; MAP.hvT = now; MAP.inT = now;
@@ -1333,6 +1379,7 @@ function mapMove(e) {
   if (MAP.dir < 0) return;
   if (MAP.pinch && MAP.pts.size >= 2) {
     const [a, b] = [...MAP.pts.values()], pc = MAP.pinch, d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dtm = Math.max(1, now - (pc.t || now - 16));
+    if (pc.my0 > H * .78 && pc.my0 - my > 24 && Math.abs(mx - pc.mx0) < (pc.my0 - my) * .7 && Math.abs(d - pc.d0) < 60) { MAP.back2 = {id:e.pointerId, y0:p.y, t:now, v:0}; MAP.dir = 0; MAP.lab = null; MAP.pinch = null; MAP.vel = [0, 0]; return; } // two fingers up from the bottom = home
     MAP.cam.x += mx - pc.mx; MAP.cam.y += my - pc.my; mapZoomAt(d / pc.d, mx, my);
     MAP.vel = [(mx - pc.mx) / dtm * 600 + MAP.vel[0] * .4, (my - pc.my) / dtm * 600 + MAP.vel[1] * .4];
     pc.d = d; pc.mx = mx; pc.my = my; pc.t = now; return;
@@ -1340,10 +1387,10 @@ function mapMove(e) {
   const pn = MAP.pan;
   if (pn && pn.id === e.pointerId) { const dtm = Math.max(1, now - pn.t); MAP.cam.x += p.x - pn.x; MAP.cam.y += p.y - pn.y; MAP.vel = [(p.x - pn.x) / dtm * 600 + MAP.vel[0] * .4, (p.y - pn.y) / dtm * 600 + MAP.vel[1] * .4]; pn.x = p.x; pn.y = p.y; pn.t = now; return; }
   const s = MAP.stroke; if (!s || s.id !== e.pointerId) return;
-  if (!s.cut && s.y0 > H * .55 && s.y0 - p.y > 24 && Math.abs(p.x - s.x0) < (s.y0 - p.y) * .7) { MAP.stroke = null; MAP.back2 = {id:e.pointerId, y0:s.y0 - 24, t:now, v:0}; MAP.dir = 0; MAP.lab = null; return; }
+  if (MAP.dn && MAP.dn.id === e.pointerId) { MAP.dn.gx = p.x; MAP.dn.gy = p.y; }
   const dd = Math.hypot(p.x - s.x, p.y - s.y), sp = dd / Math.max(1, now - s.t) * 1000;
   s.moved = Math.max(s.moved, Math.hypot(p.x - s.x0, p.y - s.y0));
-  if (sp > P.mapCutSpeed && dd > 2 && mapCut(s.x, s.y, p.x, p.y, now)) { s.cut = true; SFX.cut(); }
+  if (!s.nocut && sp > P.mapCutSpeed && dd > 2 && mapCut(s.x, s.y, p.x, p.y, now)) { s.cut = true; SFX.cut(); }
   s.x = p.x; s.y = p.y; s.t = now;
 }
 function mapUp(e) {
@@ -1357,8 +1404,9 @@ function mapUp(e) {
       if (p.y > H - 64 && Math.abs(p.x - W / 2) < 70) { mapExit(now); best = null; }
       else if (best && bd < (e.pointerType === 'touch' ? 20 : 10)) { MAP.lab = best; MAP.labT = now; MAP.tapT = -1e9; SFX.node(MAP.N.indexOf(best)); }
       else { MAP.lab = null; if (now - MAP.tapT < 320) { MAP.ct = mapFit(); MAP.tapT = -1e9; SFX.fit(); } else MAP.tapT = now; }
-    } else if (s.y0 > H * .7 && p.y - s.y0 < -110 && Math.abs(p.x - s.x0) < s.y0 - p.y) mapExit(now);
+    }
   }
+  if (MAP.dn && MAP.dn.id === e.pointerId) { if (MAP.dn.maxStr > P.mapDragMax * .35) SFX.snapBack(MAP.dn.maxStr / P.mapDragMax); MAP.dn = null; }
   if (s && s.id === e.pointerId) MAP.stroke = null;
   if (MAP.pan && MAP.pan.id === e.pointerId) { if (now - MAP.pan.t > 80) MAP.vel = [0, 0]; MAP.pan = null; }
   MAP.pts.delete(e.pointerId);
@@ -1381,6 +1429,12 @@ function mapCut(x0, y0, x1, y1, now) {
       if (u < .18 || u > .82) break;
       l.st = 'cut'; l.u = u; l.tc = now; hit = true;
       const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.max(1, Math.hypot(dx, dy));
+      // each synapse heals in its own time and shape: short, strong, small ones are quick; a mass cut queues up and heals as a cascade
+      MAP.regQ = Math.max(now, MAP.regQ || 0) + 70 + Math.random() * 150;
+      const dn = clamp(d / 220, 0, 1.5), sz = clamp((l.a.r + l.b.r) / 24, .5, 1.4), rr = Math.random();
+      l.rd = Math.max(0, P.synRegrow) * 1000 * (.25 + 1.5 * rr * rr) * (.6 + .8 * dn) * (1.3 - .6 * clamp(l.s, 0, 1)) + (MAP.regQ - now) * (.3 + 1.1 * Math.random());
+      l.rl = (700 + 2600 * Math.random()) * (.6 + .6 * dn) * (.8 + .4 * sz);
+      l.rc = .75 + 1.15 * Math.random();
       l.a.vx -= dx / d * 40; l.a.vy -= dy / d * 40; l.b.vx += dx / d * 40; l.b.vy += dy / d * 40;
       break;
     }
@@ -1396,7 +1450,7 @@ function mapFrame(now) {
   // the home screen scrolls down and away (the core leaves with it); the same thought orbs stay and walk to their places
   const hs = sm5(A / .55);
   MAP.lay.style.opacity = sm5((A - .7) / .3); MAP.back.style.opacity = MAP.dir >= 0 ? sm5((A - .8) / .2) : 0;
-  if (A <= 0 && MAP.dir < 0) { MAP.on = false; MAP.dir = 0; HV.NS = 0; MAP.lay.innerHTML = ''; MAP.back.style.opacity = 0; return; }
+  if (A <= 0 && MAP.dir < 0) { MAP.on = false; MAP.dir = 0; HV.NS = 0; MAP.lay.innerHTML = ''; MAP.dn = null; MAP.back.style.opacity = 0; return; }
   mapPhys(dt, false);
   const fp = [...MAP.pts.values()][0], hov = now - (MAP.hvT || -1e9) < 2500, idle = !fp && !hov;
   const tg = fp ? [fp.x, fp.y] : hov ? [MAP.hv.x, MAP.hv.y] : [W / 2 + Math.sin(T * .21) * W * .3, H * .45 + Math.cos(T * .17) * H * .2];
@@ -1443,7 +1497,7 @@ function mapFrame(now) {
     if (gl <= 0) continue;
     const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.max(1, Math.hypot(dx, dy));
     // a synapse appears as a hair-thin thread between two settled cells and thickens (no growing tip)
-    const rw = Math.max(.7, P.synW * (.4 + 1.2 * l.s) * Math.pow(z, .8)) * gl, w = P.orbLevel * (l.x ? P.synOut : P.synIn);
+    const ten = l.d0 ? clamp((d / z - l.d0) / (l.d0 * 1.3), 0, 1) : 0, rw = Math.max(.7, P.synW * (.4 + 1.2 * l.s) * Math.pow(z, .8) * (1 - .45 * ten)) * gl, w = P.orbLevel * (l.x ? P.synOut : P.synIn);
     const at = s => [pa.x + dx * s, pa.y + dy * s];
     // a synapse starts under each cell's skin (not at its centre), so nothing runs through the cell body
     const ea = Math.min(.45, pa.r * P.synInset / d), eb = 1 - Math.min(.45, pb.r * P.synInset / d), A0 = at(ea), B0 = at(eb);
@@ -1451,7 +1505,7 @@ function mapFrame(now) {
     let ta = 1, tb = 1;
     if (l.st === 'cut') {
       const e = sm5((now - l.tc) / (Math.max(.1, P.synRetract) * 1000)), sa = Math.min(.45, pa.r * .8 / d), sb = Math.min(.45, pb.r * .8 / d);
-      const reg = P.synRegrow > 0 ? sm5((now - l.tc - P.synRegrow * 1000) / 1600) : 0;
+      const reg = P.synRegrow > 0 ? sm5(Math.pow(clamp((now - l.tc - (l.rd || 0)) / (l.rl || 1600), 0, 1), l.rc || 1)) : 0;
       if (reg >= 1) l.st = 'ok';
       else { const a0 = l.u + (sa - l.u) * e, b0 = l.u + (1 - sb - l.u) * e; ta = a0 + (.5 - a0) * reg; tb = b0 + (.5 - b0) * reg; }
     }

@@ -60,7 +60,7 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 // music bus = 0.2 of full scale; Web Audio output is scaled by the device volume, so music is always 20% of what the user set
 const SFX = (() => {
   const AC = window.AudioContext || window.webkitAudioContext, PEN = [0, 2, 4, 7, 9], MUS = .2, R = Math.random;
-  let ac = null, sfx, mus, rv, noise, recOn = false, musOn = true, musNext = 0, musTick = 0, chordI = 0;
+  let ac = null, sfx, mus, rv, noise, bnoise, recOn = false, musOn = true, musNext = 0, musTick = 0, chordI = 0;
   const lim = {};
   try { musOn = localStorage.getItem('bd_music') !== '0'; } catch (e) {}
   const hz = m => 440 * Math.pow(2, (m - 69) / 12);
@@ -85,6 +85,8 @@ const SFX = (() => {
     rv = ac.createConvolver(); rv.buffer = ir; const rvo = ac.createGain(); rvo.gain.value = .55; rv.connect(rvo); rvo.connect(master);
     const ms = ac.createGain(); ms.gain.value = .8; mus.connect(ms); ms.connect(rv);
     noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = R() * 2 - 1;
+    // brown noise: a deep, soft rush (no hiss, never a broom); loops cleanly because the buffer is long
+    bnoise = ac.createBuffer(1, ac.sampleRate * 3, ac.sampleRate); const bd = bnoise.getChannelData(0); let br = 0; for (let i = 0; i < bd.length; i++) { br = (br + .02 * (R() * 2 - 1)) / 1.02; bd[i] = br * 3.5; }
     document.addEventListener('visibilitychange', () => { if (document.hidden) ac.suspend(); else ac.resume(); });
     if (musOn) musStart();
     return true;
@@ -103,7 +105,7 @@ const SFX = (() => {
   }
   // liquid tone: sine gliding up into pitch (a drop settling), slow swell, no hard edge, quiet by design; br = a touch of shimmer
   function syn(f, g, o = {}) {
-    const t = ac.currentTime + (o.at || 0), d = (o.d || 1) * 1.3, b = o.br ?? .4, v = vout(o.wet ?? .4, o.bus), lp = ac.createBiquadFilter(), end = t + d * 1.3;
+    const t = ac.currentTime + (o.at || 0), d = (o.d || 1) * 1.3, b = o.br ?? .4, v = vout(o.wet ?? .4, o.bus, o.pan), lp = ac.createBiquadFilter(), end = t + d * 1.3;
     f = dt(f);
     v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g) * .45, t + .035); v.gain.setTargetAtTime(0, t + .035, d / 4);
     lp.type = 'lowpass'; lp.Q.value = .2; lp.frequency.setValueAtTime(f * 1.5, t); lp.frequency.linearRampToValueAtTime(f * (1.6 + b), t + .08); lp.frequency.setTargetAtTime(f * 1.1, t + .08, d * .3); lp.connect(v);
@@ -132,14 +134,17 @@ const SFX = (() => {
   }
   // continuous gesture voices: built once, driven by the gesture, fade out by themselves ~0.1 s after updates stop
   const CV = {};
-  function cv(name, build) { const c = CV[name] || (CV[name] = build()); clearTimeout(c.to); c.to = setTimeout(() => c.g.gain.setTargetAtTime(0, ac.currentTime, .15), 90); return c; }
-  // water surface under the finger: low band-passed noise with a slow lap (gain + filter wobble), never wind-like
+  function cv(name, build) { const c = CV[name] || (CV[name] = build()); clearTimeout(c.to); c.to = setTimeout(() => c.g.gain.setTargetAtTime(0, ac.currentTime, c.rel || .15), 90); return c; }
+  // dragging liquid / pushing a soft canvas: deep brown-noise rush (lowpass + soft resonance) over a low body tone, one voice driven by finger speed
   function washV() {
-    const g = ac.createGain(), am = ac.createGain(), bp = ac.createBiquadFilter(), lp = ac.createBiquadFilter(), n = ac.createBufferSource(), v = vout(.4);
-    g.gain.value = 0; am.gain.value = .75; bp.type = 'bandpass'; bp.Q.value = .8; bp.frequency.value = 500; lp.type = 'lowpass'; lp.frequency.value = 1200;
-    n.buffer = noise; n.loop = true; n.connect(bp); bp.connect(lp); lp.connect(am); am.connect(g); g.connect(v); n.start();
-    for (const [hzL, dst, dep] of [[1.7, am.gain, .25], [2.9, bp.frequency, 90], [.6, bp.frequency, 60]]) { const l = ac.createOscillator(), lg = ac.createGain(); l.frequency.value = hzL; lg.gain.value = dep; l.connect(lg); lg.connect(dst); l.start(); }
-    return {g, bp, lp};
+    const g = ac.createGain(), lp = ac.createBiquadFilter(), pk = ac.createBiquadFilter(), n = ac.createBufferSource(), v = vout(.35), bo = ac.createGain(), body = ac.createBiquadFilter(), a = ac.createOscillator(), b = ac.createOscillator(), b2 = ac.createGain();
+    g.gain.value = 0; lp.type = 'lowpass'; lp.Q.value = .4; lp.frequency.value = 300; pk.type = 'peaking'; pk.Q.value = 3; pk.gain.value = 6; pk.frequency.value = 220;
+    n.buffer = bnoise; n.loop = true; n.connect(lp); lp.connect(pk); pk.connect(g);
+    a.type = b.type = 'sine'; a.frequency.value = hz(38); b.frequency.value = hz(50); b2.gain.value = .5; bo.gain.value = 0; body.type = 'lowpass'; body.frequency.value = 400;
+    a.connect(body); b.connect(b2); b2.connect(body); body.connect(bo); bo.connect(g); g.connect(v); n.start(); a.start(); b.start();
+    // very slow drift of the resonance so a long drag never sounds static
+    const l = ac.createOscillator(), lg = ac.createGain(); l.frequency.value = .23; lg.gain.value = 40; l.connect(lg); lg.connect(pk.frequency); l.start();
+    return {g, lp, pk, bo, a, b, l:0, rel:.3};
   }
   // zoom: soft open fifth whose pitch and brightness follow the zoom level
   function zoomV() {
@@ -148,23 +153,31 @@ const SFX = (() => {
     for (const [m, a, ty] of [[50, 1, 'sine'], [57, .5, 'triangle'], [62, .3, 'sine'], [69, .12, 'triangle']]) { const k = ac.createGain(); k.gain.value = a; k.connect(lp); const o = ac.createOscillator(); o.type = ty; o.frequency.value = hz(m); o.connect(k); o.start(); os.push(o); }
     return {g, lp, os};
   }
-  // stretch: two close sines beating faster as the pull grows (tension without a hard edge)
+  // tension: soft membrane tone rising up to a fifth and starting to shiver near the tearing point, over a deep creak of rush
   function strV() {
-    const g = ac.createGain(), lp = ac.createBiquadFilter(), v = vout(.3), a = ac.createOscillator(), b = ac.createOscillator();
-    g.gain.value = 0; lp.type = 'lowpass'; lp.Q.value = .5; lp.frequency.value = 400; a.type = 'sine'; b.type = 'triangle'; a.frequency.value = b.frequency.value = hz(50);
-    const bg = ac.createGain(); bg.gain.value = .4; a.connect(lp); b.connect(bg); bg.connect(lp); lp.connect(g); g.connect(v); a.start(); b.start();
-    return {g, lp, a, b};
+    const g = ac.createGain(), lp = ac.createBiquadFilter(), v = vout(.3), a = ac.createOscillator(), b = ac.createOscillator(), bg = ac.createGain(), n = ac.createBufferSource(), ng = ac.createGain(), nl = ac.createBiquadFilter();
+    g.gain.value = 0; lp.type = 'lowpass'; lp.Q.value = .7; lp.frequency.value = 300; a.type = b.type = 'sine'; a.frequency.value = b.frequency.value = hz(50); bg.gain.value = .6;
+    n.buffer = bnoise; n.loop = true; nl.type = 'lowpass'; nl.frequency.value = 350; ng.gain.value = 0;
+    a.connect(lp); b.connect(bg); bg.connect(lp); n.connect(nl); nl.connect(ng); ng.connect(lp); lp.connect(g); g.connect(v); a.start(); b.start(); n.start();
+    return {g, lp, a, b, ng, rel:.12};
   }
   const SYN = {n:0, t:0}; // leaky count of recent synapse voices (cascade cap)
   // split/join ladder: quick successive splits climb the scale, joins step back down — a little melody you play with the blob
   let lad = 0, ladT = 0;
   const step = dir => { const n = performance.now(); if (n - ladT > 2200) lad = 0; ladT = n; lad = Math.max(-3, Math.min(10, lad + dir)); return lad; };
-  // breath: band-passed noise swell sweeping up or down
+  // breath: deep brown-noise swell through a sweeping lowpass (up = opening, down = closing) — air, never hiss
   function air(up, g, o = {}) {
-    const t = ac.currentTime + (o.at || 0), d = o.d || .6, v = vout(o.wet ?? .35, o.bus), bp = ac.createBiquadFilter(), [a, b] = up ? [350, 2200] : [2200, 350];
-    bp.type = 'bandpass'; bp.Q.value = .9; bp.frequency.setValueAtTime(a, t); bp.frequency.exponentialRampToValueAtTime(b, t + d); bp.connect(v);
+    const t = ac.currentTime + (o.at || 0), d = o.d || .6, v = vout(o.wet ?? .35, o.bus), lp = ac.createBiquadFilter(), [a, b] = up ? [180, 1400] : [1400, 180];
+    lp.type = 'lowpass'; lp.Q.value = 1.2; lp.frequency.setValueAtTime(a, t); lp.frequency.exponentialRampToValueAtTime(b, t + d); lp.connect(v);
     v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g), t + d * .45); v.gain.linearRampToValueAtTime(0, t + d);
-    nz(t, d + .02, bp);
+    const s = ac.createBufferSource(); s.buffer = bnoise; s.loop = true; s.connect(lp); s.start(t, R() * 2); s.stop(t + d + .02);
+  }
+  // wet puff: short dark noise breath closing down (the "release" layer of a tear)
+  function puff(g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), v = vout(o.wet ?? .3, o.bus, o.pan), lp = ac.createBiquadFilter(), s = ac.createBufferSource();
+    lp.type = 'lowpass'; lp.frequency.setValueAtTime(900, t); lp.frequency.exponentialRampToValueAtTime(200, t + .15); lp.connect(v);
+    v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g), t + .006); v.gain.setTargetAtTime(0, t + .006, .04);
+    s.buffer = bnoise; s.connect(lp); s.start(t, R() * 2); s.stop(t + .3);
   }
 
   // background music: slow crossfading pad chords only (no plucks), inside the same key
@@ -192,24 +205,25 @@ const SFX = (() => {
 
   return {
     unlock: init,
-    // map blob drag: s = stretch 0..1+ (called every frame while held) → soft wet tension, pitch and beating rise with the pull
-    stretch: ev(s => { if (s < .04) return; const c = cv('str', strV), t = ac.currentTime, k = Math.min(1.2, s);
-      c.g.gain.setTargetAtTime(.05 * Math.sqrt(k), t, .05); c.a.frequency.setTargetAtTime(hz(50) * (1 + .5 * k), t, .06); c.b.frequency.setTargetAtTime(hz(50) * (1 + .5 * k) + 1 + 6 * k, t, .06); c.lp.frequency.setTargetAtTime(300 + 900 * k, t, .06); }),
-    // the blob pulled loose from its place: wet two-part release (low gulp + bright drop), panned
-    tear: ev((x = .5) => { if (!gate('tear', 150)) return; blp(nt(-3), .09, {pan:(x - .5) * 1.2}); pip(nt(4 + Math.floor(R() * 3)), .07, {at:.05, pan:(x - .5) * 1.2}); hap([4, 25, 8]); }),
-    // released blob springs home: sine whose pitch wobbles and settles like the spring (bigger stretch = wider, longer)
-    snapBack: ev((s = .5) => { if (!gate('snap', 90)) return; const k = Math.min(1.5, s), t = ac.currentTime, d = .45 + .35 * k, f = nt(Math.round(2 - k * 2)), v = vout(.35), lp = ac.createBiquadFilter(), w = ac.createOscillator(), wg = ac.createGain();
-      v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(.09), t + .015); v.gain.setTargetAtTime(0, t + .015, d / 4);
-      lp.type = 'lowpass'; lp.frequency.value = f * 2; lp.connect(v); w.frequency.value = 7 + 3 * R(); wg.gain.setValueAtTime(f * .07 * k, t); wg.gain.setTargetAtTime(0, t, d / 3); w.connect(wg);
-      const o = osc('sine', f, t, t + d * 1.4, lp); wg.connect(o.frequency); w.start(t); w.stop(t + d * 1.4); sub(hz(45), .08 * k, {d:.25, dr:1.2}); hap(5); }),
-    // a ring born on the liquid background: barely-there droplet texture on top of the finger wash
-    ripple: ev((amp = .5) => { if (recOn || !gate('rip', 70)) return; pip(nt(7 + Math.floor(R() * 6)), .012 + .022 * amp, {d:.12, wet:.5, pan:(R() - .5) * .8}); }),
-    // synapse finished regrowing: q = regrow time (ms) — fast = higher + shorter; s = strength (stronger = warmer); x = screen 0..1
+    // map blob drag: s = max synapse tension 0..1 (1 = tears), every frame while held → membrane tone rising a fifth, shivering near the tear
+    stretch: ev(s => { if (s < .05) return; const c = cv('str', strV), t = ac.currentTime, k = Math.min(1, s), f = hz(50) * Math.pow(2, 7 * k * k / 12);
+      c.g.gain.setTargetAtTime(.045 * k * k, t, .06); c.a.frequency.setTargetAtTime(f, t, .05); c.b.frequency.setTargetAtTime(f + .5 + 7 * k * k * k, t, .05); c.lp.frequency.setTargetAtTime(260 + 700 * k, t, .06); c.ng.gain.setTargetAtTime(.5 * k, t, .08); }),
+    // a synapse (or the blob) pulled loose: low wet gulp + a short dark puff, panned; no bright drop
+    tear: ev((x = .5) => { if (!gate('tear', 120)) return; const p = (x - .5) * 1.2; blp(nt(-3), .08, {pan:p, d:.28}); puff(.05, {pan:p}); hap([4, 25, 8]); }),
+    // released blob springs home: pitch settles down from slightly above while a decaying tremolo sways it — like the spring, never a "boing"
+    snapBack: ev((s = .5) => { if (!gate('snap', 90)) return; const k = Math.min(1.5, s), t = ac.currentTime, d = .4 + .3 * k, f = nt(-2), v = vout(.35), tr = ac.createGain(), w = ac.createOscillator(), wg = ac.createGain(), lp = ac.createBiquadFilter();
+      v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(.06 + .02 * k), t + .02); v.gain.setTargetAtTime(0, t + .02, d / 4);
+      tr.gain.value = 1; w.frequency.value = 5 + 2 * R(); wg.gain.setValueAtTime(.45 * Math.min(1, k), t); wg.gain.setTargetAtTime(0, t, d / 3); w.connect(wg); wg.connect(tr.gain);
+      lp.type = 'lowpass'; lp.frequency.value = f * 2; tr.connect(lp); lp.connect(v);
+      osc('sine', f * (1 + .05 * k), t, t + d * 1.4, tr).frequency.setTargetAtTime(f, t, d / 5); w.start(t); w.stop(t + d * 1.4); hap(5); }),
+    // tap / hold in place on the background: one soft low "blup"
+    ripple: ev((amp = .5) => { if (recOn || !gate('rip', 120)) return; blp(nt(-2 + Math.floor(R() * 3)), .03 + .03 * amp, {d:.3, wet:.45, pan:(R() - .5) * .6}); }),
+    // synapse finished regrowing: q = regrow time (ms) — fast = higher + shorter; s = strength (stronger = fuller); x = screen 0..1
     synapse: ev((q = 1600, s = .5, x = .5) => { const n = performance.now(); SYN.n = Math.max(0, SYN.n - (n - SYN.t) / 90) + 1; SYN.t = n; if (SYN.n > 6 || !gate('syn', 28)) return; // burst up to 6, then ~1 per 90 ms
-      const fast = Math.max(0, Math.min(1, 1 - (q - 700) / 2600)), k = 3 + Math.round(fast * 6) + (R() < .3 ? 1 : 0), d = .12 + .25 * (1 - fast);
-      pip(nt(k), .03 + .035 * s, {d, wet:.35, pan:(x - .5) * 1.2}); if (s > .6) syn(nt(k - 5), .04, {d:.5, br:.1}); }),
+      const fast = Math.max(0, Math.min(1, 1 - (q - 700) / 2600)), k = 3 + Math.round(fast * 6) + (R() < .3 ? 1 : 0), d = .15 + .3 * (1 - fast);
+      syn(nt(k), .07 + .07 * s, {d, br:.1, wet:.35, pan:(x - .5) * 1.2}); }),
     // switching screens with two fingers: long soft dark whoosh, up = into the map, down = back home
-    whoosh: ev(up => { if (!gate('whoosh', 300)) return; air(up, .028, {d:.75, wet:.45}); hap(3); }),
+    whoosh: ev(up => { if (!gate('whoosh', 300)) return; air(up, .04, {d:.8, wet:.45}); hap(3); }),
     get music() { return musOn; },
     toggleMusic: ev(() => { musOn = !musOn; try { localStorage.setItem('bd_music', musOn ? '1' : '0'); } catch (e) {} if (musOn) musStart(); else musStop(); syn(nt(musOn ? 7 : 2), .25, {d:.8}); hap(6); }),
     recStart: ev(() => { recOn = true; duck(true); sub(hz(38), .55, {d:.5}); plop(nt(0), .35, {up:1.5, d:.12, at:.02}); hap(16); }),
@@ -233,8 +247,9 @@ const SFX = (() => {
     heal: ev(() => { lad = 0; sub(hz(50), .14, {d:.5, dr:1.1}); syn(nt(0), .11, {d:1.1, br:.2}); syn(nt(4), .07, {at:.07, d:1.2, br:.2}); hap([4, 30, 6]); }),
     pull: ev(() => { air(true, .03, {d:.4, wet:.4}); hap(3); }),
     // finger moving over the screen (home, blob drag, map pan): sp = px/s; heavy = dragging the blob itself (deeper water)
-    stroke: ev((sp, heavy) => { if (recOn) return; const c = cv('wash', washV), l = Math.min(1, sp / 1600), t = ac.currentTime, h = heavy ? .6 : 1;
-      c.g.gain.setTargetAtTime(.075 * Math.sqrt(l) * (heavy ? 1.3 : 1), t, .06); c.bp.frequency.setTargetAtTime((320 + 900 * l) * h, t, .08); c.lp.frequency.setTargetAtTime((800 + 2200 * l) * h, t, .08); }),
+    stroke: ev((sp, heavy) => { if (recOn) return; const c = cv('wash', washV), l = Math.min(1, sp / 1400), t = ac.currentTime, h = heavy ? .7 : 1, tc = l > c.l ? .09 : .22; c.l = l; // swells in, settles out
+      c.g.gain.setTargetAtTime(.06 * Math.pow(l, .7) * (heavy ? 1.25 : 1), t, tc); c.lp.frequency.setTargetAtTime((220 + 700 * l) * h, t, tc); c.pk.frequency.setTargetAtTime((180 + 260 * l) * h, t, tc);
+      c.bo.gain.setTargetAtTime(.25 + .2 * l, t, tc); c.a.frequency.setTargetAtTime(hz(38) * h * (1 + .15 * l), t, tc); c.b.frequency.setTargetAtTime(hz(50) * h * (1 + .15 * l), t, tc); }),
     // z = map zoom (0.25..12), dl = ln of this step's zoom factor
     zoom: ev((z, dl) => { const c = cv('zoom', zoomV), k = Math.max(0, Math.min(1, Math.log(z / .25) / Math.log(48))), t = ac.currentTime;
       c.lp.frequency.setTargetAtTime(260 + 2200 * k * k, t, .08); for (const o of c.os) o.detune.setTargetAtTime((k - .4) * 700, t, .1);
@@ -1350,8 +1365,8 @@ function mapPhys(dt, settle) {
     // the finger pulls through a rubber band: the farther it goes the less the blob follows, while synapses and the rest spring pull back harder
     const n = dn.n, c = MAP.cam, tx = (dn.gx - c.x) / c.z + dn.ox, ty = (dn.gy - c.y) / c.z + dn.oy, dx = tx - n.x, dy = ty - n.y, m = Math.max(.01, Math.hypot(dx, dy)), lim = Math.max(10, P.mapDragMax), e = lim * Math.tanh(m / lim);
     n.ax += dx / m * e * P.mapDragK; n.ay += dy / m * e * P.mapDragK;
-    dn.str = Math.hypot(n.x - n.rx, n.y - n.ry); dn.maxStr = Math.max(dn.maxStr, dn.str); SFX.stretch(dn.str / lim);
-    if (!dn.tore && dn.str > lim * .7) { dn.tore = true; SFX.tear(dn.gx / W); }
+    dn.str = Math.hypot(n.x - n.rx, n.y - n.ry); dn.maxStr = Math.max(dn.maxStr, dn.str);
+    if (!dn.tore && dn.str > lim * .7) dn.tore = true;
   }
   for (let i = 0; i < N.length; i++) for (let j = i + 1; j < N.length; j++) {
     const A = N[i], B = N[j], dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy;
@@ -1359,13 +1374,16 @@ function mapPhys(dt, settle) {
     const d = Math.sqrt(d2) + .01, f = P.mapRepel * (A.gi === B.gi ? 1 : 2.5) / (d2 + 100);
     A.ax -= dx / d * f; A.ay -= dy / d * f; B.ax += dx / d * f; B.ay += dy / d * f;
   }
+  let tmx = 0; // highest synapse tension while dragging (1 = tears) drives the stretch sound
   for (const l of MAP.L) {
     const A = l.a, B = l.b, dx = B.x - A.x, dy = B.y - A.y, d = Math.max(1, Math.hypot(dx, dy));
-    if (MAP.dn && l.st === 'ok' && !settle && l.d0 && d / l.d0 - 1 > P.synTear) { mapSever(l, .5, performance.now(), d); SFX.tear(.5); }
+    if (MAP.dn && l.st === 'ok' && !settle && l.d0) tmx = Math.max(tmx, (d / l.d0 - 1) / P.synTear);
+    if (MAP.dn && l.st === 'ok' && !settle && l.d0 && d / l.d0 - 1 > P.synTear) { mapSever(l, .5, performance.now(), d); SFX.tear(w2s((A.x + B.x) / 2, (A.y + B.y) / 2)[0] / W); }
     const kf = l.st === 'ok' ? 1 : (l.reg || 0); if (kf <= 0) continue;
     const f = kf * P.synK * (l.x ? P.synCross : 1) * (d - P.synLen * (l.x ? 2.6 : 1.4 - .6 * l.s) - A.r - B.r) * .1;
     A.ax += dx / d * f; A.ay += dy / d * f; B.ax -= dx / d * f; B.ay -= dy / d * f;
   }
+  if (MAP.dn && !settle) SFX.stretch(tmx);
   const dmp = Math.exp(-P.mapDamp * dt);
   for (const n of N) { n.vx = (n.vx + n.ax * dt) * dmp; n.vy = (n.vy + n.ay * dt) * dmp; n.x += n.vx * dt; n.y += n.vy * dt; }
 }

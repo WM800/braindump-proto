@@ -331,7 +331,7 @@ window.addEventListener('pointermove', e => {
   if (grabP && e.pointerId === grabP.id) { const p = pt(e); grabP.moved = Math.max(grabP.moved, Math.hypot(p.x - grabP.x0, p.y - grabP.y0)); }
   const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
   if (swipe && e.pointerId === swipe.id && swipe.y0 < H * .35 && p.y - swipe.y0 > 24 && Math.abs(p.x - swipe.x0) < (p.y - swipe.y0) * .7) {
-    const id = swipe.id; mapEnter(performance.now(), true); MAP.pull = {id, y0:swipe.y0 + 24, t:performance.now(), v:0}; swipe = null; return;
+    const id = swipe.id, y0 = swipe.y0 + 24; mapEnter(performance.now(), true); MAP.pull = {id, y0, t:performance.now(), v:0}; swipe = null; return;
   }
   if (swipe && e.pointerId === swipe.id) {
     swipe.acc += Math.hypot(p.x - swipe.lx, p.y - swipe.ly); swipe.lx = p.x; swipe.ly = p.y;

@@ -379,7 +379,7 @@ void main(){
   // finger wake: one continuous groove along the path (overlapping soft bumps), spreading and fading with age
   float tg=0.;for(int i=0;i<48;i++){if(float(i)>=uNT)break;vec4 t=uT[i];if(t.z<=0.)continue;vec2 dv=p0-t.xy;float d2=dot(dv,dv);float rr=t.w+40.;if(d2>rr*rr)continue;float d=max(sqrt(d2),1.);float wl=15.+9.*t.w/120.;float x=(d-t.w)/wl;float e=exp(-x*x*1.2);float s=6.2832*x;
     tg+=t.z*e*(-2.4*x*cos(s)-6.2832*sin(s))/wl*dot(dv/d,vec2(-.7071,-.7071))*inversesqrt(1.+d*.03);}
-  float hv=rg*.75+tg*.5;hv=.5*(hv+sqrt(hv*hv+4e-5))-.0045;c+=clamp(hv,0.,1.)*(1.-.75*max(m,m2));
+  float hv=rg*.75+tg*.5;hv=.5*(hv+sqrt(hv*hv+4e-5))-.0045;c+=clamp(hv,0.,1.)*(1.-max(m,m2));
   gl_FragColor=vec4(vec3(c),1.);
 }`;
 

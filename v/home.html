@@ -87,7 +87,7 @@ const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
 uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
-uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec2 uSSm;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
+uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
@@ -137,13 +137,16 @@ void main(){
   float og2=exp(-max(-(f2-1.)/gn2,0.)/uGR);
   float c1=c;
   c=mix(c,body+rim2+sp2,m2)+og2*(1.-m2)*.08*bw;
-  // filled synapses = the same shader with a wider edge: where the field is mostly synapse (smooth share fs/f2) the edge band
-  // stretches over the whole width and the normal follows a tube profile, so ball and synapse stay one smooth structure
+  // filled synapses = the same shader with a wider edge. The edge band is read from a field where the synapse part saturates
+  // below 1 (fs/(1+fs)), so a synapse alone never gets a dark inside while the ball's dark core stays a smooth blob that only
+  // swells a little toward the synapse. The normal tilt shrinks toward the synapse axis (tube profile, 1/sqrt(fs)) and is 1
+  // away from synapses, so ball, neck and synapse are one continuously shaded surface
   if(uSF>0.){
-    float wq=smoothstep(uSSm.x,uSSm.y,f2>0.?fs/f2:0.)*smoothstep(.75,1.15,inversesqrt(max(f2-fs,1e-4)));float ir=inversesqrt(max(f2,1.));
-    float e3=1.-smoothstep(1.,uOB,pow(max(f2,1.),1.-wq));
-    vec3 N3=normalize(vec3(-G2/gn2*.9*mix(e2,ir,wq),1.));float s3=max(dot(N3.xy,ld),0.);float k3=bw+pk*.5;
-    float rim3=e3*e3*uRim*(.6+1.2*s3*s3*att)*k3*mix(1.,uSF,wq*(1.-ir));
+    float fb=max(f2-fs,0.),g3=fb+fs/(1.+fs);
+    float e3=1.-smoothstep(1.,uOB,g3);
+    float tt=min(1.,inversesqrt(max(fs,1e-4)));
+    vec3 N3=normalize(vec3(-G2/gn2*.9*e3*tt,1.));float s3=max(dot(N3.xy,ld),0.);float k3=bw+pk*.5;
+    float rim3=e3*e3*uRim*(.6+1.2*s3*s3*att)*k3*mix(1.,uSF,1.-tt);
     float sp3=pow(max(dot(N3,Hv),0.),40.)*.3*e3*(.4+.6*att)*k3;
     c=mix(c1,body+rim3+sp3,m2)+og2*(1.-m2)*.08*bw;}
   for(int i=0;i<4;i++){vec4 g=uGlow[i];if(g.w<=0.)continue;float d=length(p-g.xy);c+=g.w*(exp(-d/g.z)+.12*exp(-d/(5.*g.z)));}
@@ -197,7 +200,7 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS','uSF','uSSm'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();

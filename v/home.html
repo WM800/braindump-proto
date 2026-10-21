@@ -129,7 +129,7 @@ void main(){
   float m2=smoothstep(-.7,.7,(f2-1.)/gn2); // 1px antialiased edge, like the core
   float e2=1.-smoothstep(1.,uOB,f2);
   // thoughts use the core's own shading scaled by their brightness bw (1 = exactly like the core); pinned = filled lit sphere
-  vec3 N2=normalize(vec3(-G2/gn2*e2*.9,1.));
+  vec3 N2=normalize(vec3(-G2/(gn2+.02*f2)*e2*.9,1.)); // soft-normalised: where blobs meet the gradient fades out, so the normal flattens instead of flipping
   float side2=max(dot(N2,L3),0.);
   float pk=f2>0.?pw/f2:0.;
   float body=.039*bw+pk*(.55+.45*sqrt(max(0.,1.-1./max(f2,1.))));
@@ -146,7 +146,7 @@ void main(){
     float fb=max(f2-fs,0.),g3=fb+fs/(1.+fs);
     float e3=1.-smoothstep(1.,uOB,g3);
     float tt=min(1.,inversesqrt(max(fs,1e-4)));
-    vec3 N3=normalize(vec3(-G2/gn2*.9*e3*tt,1.));float s3=max(dot(N3,L3),0.);float k3=bw+pk*.5;
+    vec3 N3=normalize(vec3(-G2/(gn2+.02*f2)*.9*e3*tt,1.));float s3=max(dot(N3,L3),0.);float k3=bw+pk*.5;
     float rim3=e3*e3*uRim*(.6+1.2*s3*s3*att)*k3*mix(1.,uSF,1.-tt);
     float sp3=pow(max(dot(N3,Hv),0.),40.)*.3*e3*(.4+.6*att)*k3;
     c=mix(c1,body+rim3+sp3,m2)+og2*(1.-m2)*.08*bw;}

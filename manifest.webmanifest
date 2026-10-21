@@ -1,6 +1,6 @@
 {
-  "name": "Braindump Proto",
-  "short_name": "Proto",
+  "name": "blob",
+  "short_name": "blob",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

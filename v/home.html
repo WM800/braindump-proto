@@ -77,7 +77,7 @@ const SFX = (() => {
     const lmt = ac.createDynamicsCompressor(); lmt.threshold.value = -8; lmt.knee.value = 6; lmt.ratio.value = 8; lmt.attack.value = .003; lmt.release.value = .2;
     const master = ac.createGain(); master.connect(lmt); lmt.connect(ac.destination);
     const soft = ac.createBiquadFilter(); soft.type = 'lowpass'; soft.frequency.value = 8500; soft.Q.value = .4; soft.connect(master);
-    sfx = ac.createGain(); sfx.gain.value = .6; sfx.connect(soft);
+    sfx = ac.createGain(); sfx.gain.value = .45; sfx.connect(soft);
     mus = ac.createGain(); mus.gain.value = 0; mus.connect(master);
     // room: generated stereo tail that darkens as it decays
     const n = Math.floor(ac.sampleRate * 2.6), ir = ac.createBuffer(2, n, ac.sampleRate);
@@ -98,16 +98,17 @@ const SFX = (() => {
 
   // water bubble: sine whose pitch rises as the cavity closes (up < 1 = gulp)
   function plop(f, g, o = {}) {
-    const t = ac.currentTime + (o.at || 0), d = o.d || .085, v = vout(o.wet ?? .18, o.bus), end = env(v, t, .002, vg(g), d);
+    const t = ac.currentTime + (o.at || 0), d = o.d || .085, v = vout(o.wet ?? .22, o.bus), end = env(v, t, .006, vg(g), d);
     const s = osc('sine', f = dt(f), t, end, v); s.frequency.exponentialRampToValueAtTime(f * (o.up || 1.8), t + d * .7);
   }
-  // round synth pluck: triangle + soft octave through a lowpass that closes fast (warm "bloop", no mallet click); br = brightness
+  // liquid tone: sine gliding up into pitch (a drop settling), slow swell, no hard edge, quiet by design; br = a touch of shimmer
   function syn(f, g, o = {}) {
-    const t = ac.currentTime + (o.at || 0), d = o.d || 1, b = o.br ?? .6, v = vout(o.wet ?? .3, o.bus), end = env(v, t, .005, vg(g), d), lp = ac.createBiquadFilter();
+    const t = ac.currentTime + (o.at || 0), d = (o.d || 1) * 1.3, b = o.br ?? .4, v = vout(o.wet ?? .4, o.bus), lp = ac.createBiquadFilter(), end = t + d * 1.3;
     f = dt(f);
-    lp.type = 'lowpass'; lp.Q.value = .8; lp.frequency.setValueAtTime(Math.min(9000, f * (2 + 6 * b)), t); lp.frequency.setTargetAtTime(f * 1.2, t + .005, d * .12); lp.connect(v);
-    const s = osc('triangle', f * 1.008, t, end, lp); s.frequency.exponentialRampToValueAtTime(f, t + .05);
-    const h = ac.createGain(); h.gain.value = .25; h.connect(lp); osc('sine', f * 2, t, end, h);
+    v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g) * .45, t + .035); v.gain.setTargetAtTime(0, t + .035, d / 4);
+    lp.type = 'lowpass'; lp.Q.value = .2; lp.frequency.setValueAtTime(f * 1.5, t); lp.frequency.linearRampToValueAtTime(f * (1.6 + b), t + .08); lp.frequency.setTargetAtTime(f * 1.1, t + .08, d * .3); lp.connect(v);
+    osc('sine', f * .94, t, end, lp).frequency.setTargetAtTime(f, t, .035);
+    const h = ac.createGain(); h.gain.value = .12 * b; h.connect(lp); osc('triangle', f * .94, t, end, h).frequency.setTargetAtTime(f, t, .035);
   }
   // warm low thump; 2nd/3rd harmonics so phone speakers still convey it
   function sub(f, g, o = {}) {

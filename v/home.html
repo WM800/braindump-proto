@@ -560,6 +560,7 @@ const TTS = (() => {
 const TT = {key:null, n:0, t:-1e9};
 // shared by home and map: tap = read the title, quick second/third tap = read the content (first sentences)
 function thoughtTap(key, title, body, now) {
+  if (!ORBS.some(o => o.asst)) return; // only the pulled-out assistant reads; without it a tap is purely visual
   if (key === TT.key && now - TT.t < 450) TT.n++; else TT.n = 1;
   TT.key = key; TT.t = now;
   TTS.speak(TT.n === 1 ? title : TTS.summary(body || title));
@@ -810,7 +811,7 @@ function draw() {
   const L = HV.L;
   g.viewport(0, 0, HV.cv.width, HV.cv.height);
   g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
-  g.uniform1f(L.uRim, rimS * P.rimGain * (1 + (ORBS.some(o => o.asst) ? 0 : .5 * TLV))); g.uniform1f(L.uGR, grS);
+  g.uniform1f(L.uRim, rimS * P.rimGain ); g.uniform1f(L.uGR, grS);
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uEB, Math.max(1.05, P.rimBand)); g.uniform1f(L.uOB, Math.max(1.05, P.orbBand)); g.uniform1f(L.uMW, Math.max(.5, P.rimMinPx)); g.uniform1f(L.uLG, P.lightGain); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH); g.uniform1f(L.uLZ, P.lampZ);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0); g.uniform2f(L.uSSm, P.synSoftLo, P.synSoftHi);
@@ -1082,7 +1083,7 @@ function frame(now) {
   if (hold) { const dx = PX - HX, dy = PY - HY, d = Math.hypot(dx, dy) || 1, s2 = Math.min(1, P.followMax / d); tx = dx * s2 * P.coreFollow; ty = dy * s2 * P.coreFollow; }
   springXY(QX, tx, 60, 12, dt); springXY(QY, ty, 60, 12, dt);
   TLV = TTS.level(now); const ASO = ORBS.find(o => o.asst); ASF.x = ASF.y = 0;
-  const cx = HX + QX.p, cy = HY + QY.p, R = 72 * sc.x * (1 + .025 * (2 * br - 1)) * (1 + (ASO ? 0 : .07 * TLV));
+  const cx = HX + QX.p, cy = HY + QY.p, R = 72 * sc.x * (1 + .025 * (2 * br - 1)) ;
   CX = cx; CY = cy; RR = R;
 
   // light: direction to pointer, wander near the core, smoothed as a vector; never audio-driven (FROM home9)

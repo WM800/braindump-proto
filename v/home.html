@@ -75,9 +75,9 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapNodeR:1, synW:1.8, synFill:0, synFillI:.6, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v33')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v34')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -115,9 +115,9 @@ void main(){
   float rim=edge*edge*uRim*(.6+uLG*side*side*att)*lwn*(1.-.3*max(uSep,0.));
   float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn*(.4+.6*att);
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
-  float f2=0.,w2=0.,pw=0.;vec2 G2=vec2(0.);
+  float f2=0.,w2=0.,pw=0.,fs=0.;vec2 G2=vec2(0.);
   for(int i=0;i<56;i++){if(float(i)>=uNM)break;vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
-  for(int i=0;i<40;i++){if(float(i)>=uNS)break;vec4 s=uS[i];vec4 rq=uSR[i/2];vec2 rw=(i-(i/2)*2)==0?rq.xy:rq.zw;vec2 ab=s.zw-s.xy;float t=clamp(dot(p-s.xy,ab)/max(dot(ab,ab),1e-4),0.,1.);vec2 dv=p-s.xy-ab*t;float d2=max(dot(dv,dv),1.);float c2=rw.x*rw.x/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*rw.y;pw+=c2*uSF;}
+  for(int i=0;i<40;i++){if(float(i)>=uNS)break;vec4 s=uS[i];vec4 rq=uSR[i/2];vec2 rw=(i-(i/2)*2)==0?rq.xy:rq.zw;vec2 ab=s.zw-s.xy;float t=clamp(dot(p-s.xy,ab)/max(dot(ab,ab),1e-4),0.,1.);vec2 dv=p-s.xy-ab*t;float d2=max(dot(dv,dv),1.);float c2=rw.x*rw.x/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*rw.y;fs+=c2;}
   float bw=f2>0.?w2/f2:0.;
   float gn2=max(length(G2),1e-4);
   float m2=smoothstep(-.7,.7,(f2-1.)/gn2); // 1px antialiased edge, like the core
@@ -131,6 +131,8 @@ void main(){
   float sp2=pow(max(dot(N2,Hv),0.),40.)*.3*e2*(.4+.6*att)*(bw+pk*.5);
   float og2=exp(-max(-(f2-1.)/gn2,0.)/uGR);
   c=mix(c,body+rim2+sp2,m2)+og2*(1.-m2)*.08*bw;
+  // filled synapses: where the field is mostly synapse, the whole width takes the lit edge colour; cells stay as they are
+  if(uSF>0.){float sf=f2>0.?fs/f2:0.;sf=smoothstep(.5,.95,sf);float fc=uRim*(.6+1.2*side2*side2*att)*bw*uSF;c=mix(c,max(c,fc+sp2),sf*m2);}
   for(int i=0;i<4;i++){vec4 g=uGlow[i];if(g.w<=0.)continue;float d=length(p-g.xy);c+=g.w*(exp(-d/g.z)+.12*exp(-d/(5.*g.z)));}
   if(uAura.w>0.){float d=length(p-uAura.xy);c+=uAura.w*(exp(-d/uAura.z)+.12*exp(-d/(5.*uAura.z)));}
   gl_FragColor=vec4(vec3(c),1.);
@@ -276,7 +278,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v33', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v34', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const BOOL = {synFill:1};
 const INT = {maxThoughts:9, maxDrops:30, dendN:5};
@@ -1174,6 +1176,8 @@ function mapFrame(now) {
     // a synapse appears as a hair-thin thread between two settled cells and thickens (no growing tip)
     const rw = Math.max(.7, P.synW * (.4 + 1.2 * l.s) * Math.pow(z, .8)) * gl, w = P.orbLevel * (l.x ? P.synOut : P.synIn);
     const at = s => [pa.x + dx * s, pa.y + dy * s];
+    // a synapse starts under each cell's skin (not at its centre), so nothing runs through the cell body
+    const ea = Math.min(.45, pa.r * P.synInset / d), eb = 1 - Math.min(.45, pb.r * P.synInset / d), A0 = at(ea), B0 = at(eb);
     l.poly = [[pa.x, pa.y, 0], [pb.x, pb.y, 1]];
     let ta = 1, tb = 1;
     if (l.st === 'cut') {
@@ -1182,8 +1186,8 @@ function mapFrame(now) {
       if (reg >= 1) l.st = 'ok';
       else { const a0 = l.u + (sa - l.u) * e, b0 = l.u + (1 - sb - l.u) * e; ta = a0 + (.5 - a0) * reg; tb = b0 + (.5 - b0) * reg; }
     }
-    if (l.st === 'cut') { const a = at(ta), b = at(tb); seg(pa.x, pa.y, a[0], a[1], rw, w); seg(b[0], b[1], pb.x, pb.y, rw, w); }
-    else { const a = at(ta); seg(pa.x, pa.y, a[0], a[1], rw, w); }
+    if (l.st === 'cut') { const a = at(Math.max(ea, ta)), b = at(Math.min(eb, tb)); seg(A0[0], A0[1], a[0], a[1], rw, w); seg(b[0], b[1], B0[0], B0[1], rw, w); }
+    else seg(A0[0], A0[1], B0[0], B0[1], rw, w);
   }
   HV.NS = ns;
   // labels: group names when zoomed out, thought names when zoomed in, the tapped one always

@@ -91,7 +91,7 @@ const SFX = (() => {
   }
   const ev = fn => (...a) => { if (init()) fn(...a); };
 
-  function vout(wet, bus) { const g = ac.createGain(); g.connect(bus || sfx); if (wet) { const s = ac.createGain(); s.gain.value = wet; g.connect(s); s.connect(rv); } return g; }
+  function vout(wet, bus, pan) { const g = ac.createGain(); if (pan && ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan)); g.connect(p); p.connect(bus || sfx); } else g.connect(bus || sfx); if (wet) { const s = ac.createGain(); s.gain.value = wet; g.connect(s); s.connect(rv); } return g; }
   function env(g, t, a, pk, d) { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(pk, t + a); g.gain.setTargetAtTime(0, t + a, d / 4); return t + a + d * 1.2; }
   function osc(type, f, t, end, dst) { const o = ac.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.connect(dst); o.start(t); o.stop(end); return o; }
   function nz(t, len, dst) { const s = ac.createBufferSource(); s.buffer = noise; s.loop = true; s.connect(dst); s.start(t, R() * .5); s.stop(t + len); return s; }
@@ -115,6 +115,42 @@ const SFX = (() => {
     const t = ac.currentTime + (o.at || 0), d = o.d || .4, dr = o.dr ?? 1.5, v = vout(o.wet ?? .08, o.bus), end = env(v, t, .006, vg(g), d);
     for (const [m, a] of [[1, 1], [2, .4], [3, .14]]) { const h = ac.createGain(); h.gain.value = a; h.connect(v); osc('sine', f * m * dr, t, end, h).frequency.exponentialRampToValueAtTime(f * m, t + .07); }
   }
+  // drop that lands: rounded sine sliding up into pitch, dark, short, panned to where it happened — the split sound
+  function pip(f, g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), d = o.d || .22, v = vout(o.wet ?? .3, o.bus, o.pan), lp = ac.createBiquadFilter(), end = t + d * 1.4;
+    f = dt(f); v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g), t + .008); v.gain.setTargetAtTime(0, t + .008, d / 4);
+    lp.type = 'lowpass'; lp.Q.value = .3; lp.frequency.value = f * 2.2; lp.connect(v);
+    osc('sine', f * .82, t, end, lp).frequency.setTargetAtTime(f, t, .012);
+    const l = ac.createGain(); l.gain.value = .35; l.connect(lp); osc('sine', f / 2, t, end, l);
+  }
+  // two drops becoming one: warm sine sinking into pitch with a soft body underneath — the join sound
+  function blp(f, g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), d = o.d || .32, v = vout(o.wet ?? .35, o.bus, o.pan), end = t + d * 1.4;
+    f = dt(f); v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g), t + .02); v.gain.setTargetAtTime(0, t + .02, d / 4);
+    osc('sine', f * 1.19, t, end, v).frequency.setTargetAtTime(f, t, .03);
+    const l = ac.createGain(); l.gain.value = .45; l.connect(v); osc('sine', f / 2 * 1.19, t, end, l).frequency.setTargetAtTime(f / 2, t, .04);
+  }
+  // continuous gesture voices: built once, driven by the gesture, fade out by themselves ~0.1 s after updates stop
+  const CV = {};
+  function cv(name, build) { const c = CV[name] || (CV[name] = build()); clearTimeout(c.to); c.to = setTimeout(() => c.g.gain.setTargetAtTime(0, ac.currentTime, .15), 90); return c; }
+  // water surface under the finger: low band-passed noise with a slow lap (gain + filter wobble), never wind-like
+  function washV() {
+    const g = ac.createGain(), am = ac.createGain(), bp = ac.createBiquadFilter(), lp = ac.createBiquadFilter(), n = ac.createBufferSource(), v = vout(.4);
+    g.gain.value = 0; am.gain.value = .75; bp.type = 'bandpass'; bp.Q.value = .8; bp.frequency.value = 500; lp.type = 'lowpass'; lp.frequency.value = 1200;
+    n.buffer = noise; n.loop = true; n.connect(bp); bp.connect(lp); lp.connect(am); am.connect(g); g.connect(v); n.start();
+    for (const [hzL, dst, dep] of [[1.7, am.gain, .25], [2.9, bp.frequency, 90], [.6, bp.frequency, 60]]) { const l = ac.createOscillator(), lg = ac.createGain(); l.frequency.value = hzL; lg.gain.value = dep; l.connect(lg); lg.connect(dst); l.start(); }
+    return {g, bp, lp};
+  }
+  // zoom: soft open fifth whose pitch and brightness follow the zoom level
+  function zoomV() {
+    const g = ac.createGain(), lp = ac.createBiquadFilter(), v = vout(.5), os = [];
+    g.gain.value = 0; lp.type = 'lowpass'; lp.Q.value = 1.5; lp.frequency.value = 500; lp.connect(g); g.connect(v);
+    for (const [m, a, ty] of [[50, 1, 'sine'], [57, .5, 'triangle'], [62, .3, 'sine'], [69, .12, 'triangle']]) { const k = ac.createGain(); k.gain.value = a; k.connect(lp); const o = ac.createOscillator(); o.type = ty; o.frequency.value = hz(m); o.connect(k); o.start(); os.push(o); }
+    return {g, lp, os};
+  }
+  // split/join ladder: quick successive splits climb the scale, joins step back down — a little melody you play with the blob
+  let lad = 0, ladT = 0;
+  const step = dir => { const n = performance.now(); if (n - ladT > 2200) lad = 0; ladT = n; lad = Math.max(-3, Math.min(10, lad + dir)); return lad; };
   // breath: band-passed noise swell sweeping up or down
   function air(up, g, o = {}) {
     const t = ac.currentTime + (o.at || 0), d = o.d || .6, v = vout(o.wet ?? .35, o.bus), bp = ac.createBiquadFilter(), [a, b] = up ? [350, 2200] : [2200, 350];
@@ -164,12 +200,19 @@ const SFX = (() => {
     bump: ev((v, r) => { if (v < 25 || !gate('bump', 40)) return; const k = Math.max(1, Math.min(11, 11 - Math.round(r / 3))), g = Math.min(.24, .03 + v / 1400);
       plop(nt(k), g, {up:1.45, d:.06 + .03 * R(), wet:.2}); syn(nt(k - 5), g * .35, {d:.35, br:.2, wet:.1}); hap(Math.round(3 + g * 30)); }),
     coreTouch: ev(v => { if (!gate('core', 140)) return; const g = Math.min(.3, .06 + v / 1200); sub(hz(50), g, {d:.3, dr:1.25}); plop(nt(0), g * .5, {up:1.3, d:.1}); hap(6); }),
-    slice: ev(() => { if (!gate('slice', 200)) return; air(true, .035, {d:.25, wet:.15}); hap(4); }),
-    split: ev(n => { if (!gate('split', 60)) return; plop(nt(4 + Math.min(n, 7)), .24, {up:2.2, d:.1}); sub(hz(45), .2, {d:.25, dr:1.8}); hap(10); }),
-    fuse: ev(() => { if (!gate('fuse', 50)) return; plop(nt(3 + Math.floor(R() * 4)), .08, {up:1.4, d:.05, wet:.15}); }),
-    heal: ev(() => { sub(hz(38), .3, {d:.5}); syn(nt(2), .1, {d:.8}); syn(nt(4), .08, {at:.08, d:.9}); plop(nt(7), .08, {at:.15}); hap([5, 30, 8]); }),
-    pull: ev(() => { air(true, .04, {d:.4}); hap(4); }),
-    zoom: ev(inw => { if (!gate('zoom', 70)) return; plop(nt(inw ? 8 : 4), .05, {d:.03, up:1.3, wet:.05}); hap(2); }),
+    slice: ev(() => { if (gate('slice', 200)) hap(3); }),
+    // split of any piece (big or small): r = piece radius, x = screen 0..1 for panning; smaller = a touch higher
+    split: ev((r = 20, x = .5) => { if (!gate('split', 35)) return; const k = 4 + step(1) + (r < 12 ? 2 : 0); pip(nt(k), .085, {pan:(x - .5) * 1.2}); hap(4); }),
+    fuse: ev((x = .5) => { if (!gate('fuse', 40)) return; blp(nt(3 + step(-1)), .075, {pan:(x - .5) * 1.2}); hap(3); }),
+    heal: ev(() => { lad = 0; sub(hz(50), .14, {d:.5, dr:1.1}); syn(nt(0), .11, {d:1.1, br:.2}); syn(nt(4), .07, {at:.07, d:1.2, br:.2}); hap([4, 30, 6]); }),
+    pull: ev(() => { air(true, .03, {d:.4, wet:.4}); hap(3); }),
+    // finger moving over the screen (home, blob drag, map pan): sp = px/s; heavy = dragging the blob itself (deeper water)
+    stroke: ev((sp, heavy) => { if (recOn) return; const c = cv('wash', washV), l = Math.min(1, sp / 1600), t = ac.currentTime, h = heavy ? .6 : 1;
+      c.g.gain.setTargetAtTime(.075 * Math.sqrt(l) * (heavy ? 1.3 : 1), t, .06); c.bp.frequency.setTargetAtTime((320 + 900 * l) * h, t, .08); c.lp.frequency.setTargetAtTime((800 + 2200 * l) * h, t, .08); }),
+    // z = map zoom (0.25..12), dl = ln of this step's zoom factor
+    zoom: ev((z, dl) => { const c = cv('zoom', zoomV), k = Math.max(0, Math.min(1, Math.log(z / .25) / Math.log(48))), t = ac.currentTime;
+      c.lp.frequency.setTargetAtTime(260 + 2200 * k * k, t, .08); for (const o of c.os) o.detune.setTargetAtTime((k - .4) * 700, t, .1);
+      c.g.gain.setTargetAtTime(Math.min(.09, .025 + Math.abs(dl) * 2), t, .05); }),
     // map node drag (not built yet): grab, contact with another node, release
     nodeGrab: ev(i => { plop(nt(3 + (i % 9)), .14, {up:1.4, d:.06}); hap(5); }),
     nodeDrop: ev(i => { plop(nt(3 + (i % 9)), .12, {up:.7, d:.08}); sub(hz(50), .12, {d:.2}); hap(6); }),
@@ -545,7 +588,9 @@ PH.addEventListener('pointerdown', e => {
   if (now - lastEmpty < 300) { lastEmpty = -1e9; toggle(now); return; }
   lastEmpty = now;
 });
+const MVL = new Map(); // last position per pointer, for the finger-on-water sound
 window.addEventListener('pointermove', e => {
+  if (e.buttons || e.pointerType === 'touch') { const q = pt(e), nw = performance.now(), l = MVL.get(e.pointerId); if (l && nw > l.t) SFX.stroke(Math.hypot(q.x - l.x, q.y - l.y) / (nw - l.t) * 1000, !!(grabP && grabP.id === e.pointerId)); MVL.set(e.pointerId, {x:q.x, y:q.y, t:nw}); }
   if (MAP.pull && e.pointerId === MAP.pull.id) { const p = pt(e), now = performance.now(), a = clamp((p.y - MAP.pull.y0) / (H * P.mapPullLen), 0, 1); MAP.pull.v = .7 * (a - MAP.a) / Math.max(.001, (now - MAP.pull.t) / 1000) + .3 * MAP.pull.v; MAP.pull.t = now; MAP.a = a; return; }
   if (MAP.on) { mapMove(e); return; }
   if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
@@ -563,6 +608,7 @@ window.addEventListener('pointermove', e => {
   drag.o.gx = p.x; drag.o.gy = p.y;
 });
 function end(e) {
+  MVL.delete(e.pointerId);
   if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = (MAP.a > P.mapNoReturn && MAP.pull.v > -1) || MAP.pull.v > 1.5 ? 1 : -1; if (MAP.dir > 0) SFX.mapIn(); MAP.pull = null; pts.delete(e.pointerId); return; }
   if (MAP.on) { mapUp(e); return; }
   if (grabP && e.pointerId === grabP.id) {
@@ -669,7 +715,7 @@ function fracture(now, dt, dts, vol, fing) {
           const k = r * .7071 * .55, bx = px - q.c.x, by = py - q.c.y, dvx = ux * v * P.cutDrag, dvy = uy * v * P.cutDrag;
           const A = {c:q.c, m:q.m / 2, ox:bx + nx * k, oy:by + ny * k, vx:q.vx + nx * imp + dvx, vy:q.vy + ny * imp + dvy, rx:q.rx + nx * k, ry:q.ry + ny * k, g:q.g, x:0, y:0, r:0, ct:now};
           const B = {c:q.c, m:q.m / 2, ox:bx - nx * k, oy:by - ny * k, vx:q.vx - nx * imp + dvx, vy:q.vy - ny * imp + dvy, rx:q.rx - nx * k, ry:q.ry - ny * k, g:q.g, x:0, y:0, r:0, ct:now};
-          FR.splice(i, 1, A, B);
+          FR.splice(i, 1, A, B); SFX.split(r, x / W);
         } else {
           const w = 1 - clamp((d - r * .75) / (r * .25 + bw), 0, 1), sg = Math.sign(sd || 1);
           q.vx += (nx * sg * imp * .6 + ux * v * P.cutDrag) * w; q.vy += (ny * sg * imp * .6 + uy * v * P.cutDrag) * w;
@@ -705,7 +751,7 @@ function fracture(now, dt, dts, vol, fing) {
     }
     let ng = 0; const gid = {};
     for (let i = 0; i < n; i++) { const r0 = ufFind(i); if (gid[r0] === undefined) gid[r0] = Math.min(7, ng++); FR[i].g = gid[r0]; }
-    if (ng > nGroups) SFX.split(ng); nGroups = Math.max(nGroups, ng);
+    nGroups = Math.max(nGroups, ng);
   } else if (!STK.length) for (let i = 0; i < n; i++) FR[i].g = 0;
   // fragment motion: loose fluid while cut, pulled home (critically damped) while healing
   kFs += (P.fragK * (cutting ? P.fragLoose : P.fragHealK) - kFs) * Math.min(1, dt * (cutting ? 8 : 3));
@@ -731,7 +777,7 @@ function fracture(now, dt, dts, vol, fing) {
       const m = a.m + b.m, wa = a.m / m, wb = b.m / m;
       b.ox = a.ox * wa + b.ox * wb; b.oy = a.oy * wa + b.oy * wb; b.vx = a.vx * wa + b.vx * wb; b.vy = a.vy * wa + b.vy * wb;
       b.rx = a.rx * wa + b.rx * wb; b.ry = a.ry * wa + b.ry * wb; b.m = m > .999 ? 1 : m; b.x = b.c.x + b.ox; b.y = b.c.y + b.oy; b.r = rOf(b);
-      SFX.fuse(); FR.splice(i, 1); break;
+      SFX.fuse(b.x / W); FR.splice(i, 1); break;
     }
   }
 }
@@ -1249,9 +1295,8 @@ function mapPhys(dt, settle) {
   for (const n of N) { n.vx = (n.vx + n.ax * dt) * dmp; n.vy = (n.vy + n.ay * dt) * dmp; n.x += n.vx * dt; n.y += n.vy * dt; }
 }
 function mapZoomAt(f, sx, sy) {
-  MAP.zAcc = (MAP.zAcc || 0) + Math.log(f); if (Math.abs(MAP.zAcc) > .12) { SFX.zoom(MAP.zAcc > 0); MAP.zAcc = 0; }
   const c = MAP.cam, z = clamp(c.z * f, .25, 12), wx = (sx - c.x) / c.z, wy = (sy - c.y) / c.z;
-  c.z = z; c.x = sx - wx * z; c.y = sy - wy * z; MAP.ct = null;
+  c.z = z; c.x = sx - wx * z; c.y = sy - wy * z; MAP.ct = null; SFX.zoom(z, Math.log(f));
 }
 function mapShake(e) {
   const a = e.acceleration && e.acceleration.x != null ? e.acceleration : null; if (!a || !MAP.on || MAP.dir < 0) return;

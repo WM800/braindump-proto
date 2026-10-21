@@ -223,7 +223,7 @@ const SFX = (() => {
       const fast = Math.max(0, Math.min(1, 1 - (q - 700) / 2600)), k = 3 + Math.round(fast * 6) + (R() < .3 ? 1 : 0), d = .15 + .3 * (1 - fast);
       syn(nt(k), .07 + .07 * s, {d, br:.1, wet:.35, pan:(x - .5) * 1.2}); }),
     // switching screens with two fingers: long soft dark whoosh, up = into the map, down = back home
-    whoosh: ev(up => { if (!gate('whoosh', 300)) return; air(up, .04, {d:.8, wet:.45}); hap(3); }),
+    whoosh: ev(up => { if (!gate('whoosh', 300)) return; air(up, .08, {d:.8, wet:.45}); hap(3); }),
     get music() { return musOn; },
     toggleMusic: ev(() => { musOn = !musOn; try { localStorage.setItem('bd_music', musOn ? '1' : '0'); } catch (e) {} if (musOn) musStart(); else musStop(); syn(nt(musOn ? 7 : 2), .25, {d:.8}); hap(6); }),
     recStart: ev(() => { recOn = true; duck(true); sub(hz(38), .55, {d:.5}); plop(nt(0), .35, {up:1.5, d:.12, at:.02}); hap(16); }),

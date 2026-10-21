@@ -56,6 +56,127 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 </div>
 <div id="dev"></div>
 <script>
+// ---- sound + haptics: all synthesized, one key (D major pentatonic) so every sound fits the music ----
+// music bus = 0.2 of full scale; Web Audio output is scaled by the device volume, so music is always 20% of what the user set
+const SFX = (() => {
+  const AC = window.AudioContext || window.webkitAudioContext, PEN = [0, 2, 4, 7, 9], MUS = .2, R = Math.random;
+  let ac = null, sfx, mus, rv, noise, recOn = false, musOn = true, musNext = 0, musTick = 0, dripT = 0, chordI = 0;
+  const lim = {};
+  try { musOn = localStorage.getItem('bd_music') !== '0'; } catch (e) {}
+  const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+  const nt = i => hz(62 + 12 * Math.floor(i / 5) + PEN[((i % 5) + 5) % 5]); // pentatonic degree, 0 = D4
+  const dt = (f, c = 7) => f * Math.pow(2, (R() * 2 - 1) * c / 1200); // tiny detune: never the exact same sound twice
+  const vg = g => g * (.86 + R() * .28);
+  const gate = (k, ms) => { const n = performance.now(); if (n - (lim[k] || -1e9) < ms) return false; lim[k] = n; return true; };
+  const hap = p => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
+
+  function init() {
+    if (!AC) return false;
+    if (ac) { if (ac.state === 'suspended' && !document.hidden) ac.resume(); return true; }
+    ac = new AC({latencyHint:'interactive'});
+    const lmt = ac.createDynamicsCompressor(); lmt.threshold.value = -8; lmt.knee.value = 6; lmt.ratio.value = 8; lmt.attack.value = .003; lmt.release.value = .2;
+    const master = ac.createGain(); master.connect(lmt); lmt.connect(ac.destination);
+    const soft = ac.createBiquadFilter(); soft.type = 'lowpass'; soft.frequency.value = 8500; soft.Q.value = .4; soft.connect(master);
+    sfx = ac.createGain(); sfx.gain.value = .6; sfx.connect(soft);
+    mus = ac.createGain(); mus.gain.value = 0; mus.connect(master);
+    // room: generated stereo tail that darkens as it decays
+    const n = Math.floor(ac.sampleRate * 2.6), ir = ac.createBuffer(2, n, ac.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); let lp = 0; for (let i = 0; i < n; i++) { const k = i / n; lp += (R() * 2 - 1 - lp) * (.5 - .42 * k); d[i] = lp * Math.pow(1 - k, 2.4); } }
+    rv = ac.createConvolver(); rv.buffer = ir; const rvo = ac.createGain(); rvo.gain.value = .55; rv.connect(rvo); rvo.connect(master);
+    const ms = ac.createGain(); ms.gain.value = .8; mus.connect(ms); ms.connect(rv);
+    noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate); const nd = noise.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = R() * 2 - 1;
+    document.addEventListener('visibilitychange', () => { if (document.hidden) ac.suspend(); else ac.resume(); });
+    if (musOn) musStart();
+    return true;
+  }
+  const ev = fn => (...a) => { if (init()) fn(...a); };
+
+  function vout(wet, bus) { const g = ac.createGain(); g.connect(bus || sfx); if (wet) { const s = ac.createGain(); s.gain.value = wet; g.connect(s); s.connect(rv); } return g; }
+  function env(g, t, a, pk, d) { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(pk, t + a); g.gain.setTargetAtTime(0, t + a, d / 4); return t + a + d * 1.2; }
+  function osc(type, f, t, end, dst) { const o = ac.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.connect(dst); o.start(t); o.stop(end); return o; }
+  function nz(t, len, dst) { const s = ac.createBufferSource(); s.buffer = noise; s.loop = true; s.connect(dst); s.start(t, R() * .5); s.stop(t + len); return s; }
+
+  // water bubble: sine whose pitch rises as the cavity closes (up < 1 = gulp)
+  function plop(f, g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), d = o.d || .085, v = vout(o.wet ?? .18, o.bus), end = env(v, t, .002, vg(g), d);
+    const s = osc('sine', f = dt(f), t, end, v); s.frequency.exponentialRampToValueAtTime(f * (o.up || 1.8), t + d * .7);
+  }
+  // soft mallet bar (marimba-like): fundamental with a tiny pitch settle, fast 4th partial, felt-tip noise
+  function bar(f, g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), d = o.d || 1.1, b = o.br ?? 1, v = vout(o.wet ?? .3, o.bus), end = env(v, t, .003, vg(g), d);
+    f = dt(f);
+    const s = osc('sine', f * 1.012, t, end, v); s.frequency.exponentialRampToValueAtTime(f, t + .04);
+    const h = ac.createGain(); h.connect(v); env(h, t, .002, .22 * b, d * .16); osc('sine', f * 3.98, t, t + d * .4, h);
+    if (f * 9.9 < 11000) { const h2 = ac.createGain(); h2.connect(v); env(h2, t, .001, .05 * b, d * .05); osc('sine', f * 9.9, t, t + d * .15, h2); }
+    const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = Math.min(6000, f * 3); bp.Q.value = 1.2;
+    const ng = ac.createGain(); env(ng, t, .001, .12 * b, .018); bp.connect(ng); ng.connect(v); nz(t, .05, bp);
+  }
+  // warm low thump; 2nd/3rd harmonics so phone speakers still convey it
+  function sub(f, g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), d = o.d || .4, dr = o.dr ?? 1.5, v = vout(o.wet ?? .08, o.bus), end = env(v, t, .006, vg(g), d);
+    for (const [m, a] of [[1, 1], [2, .4], [3, .14]]) { const h = ac.createGain(); h.gain.value = a; h.connect(v); osc('sine', f * m * dr, t, end, h).frequency.exponentialRampToValueAtTime(f * m, t + .07); }
+  }
+  // breath: band-passed noise swell sweeping up or down
+  function air(up, g, o = {}) {
+    const t = ac.currentTime + (o.at || 0), d = o.d || .6, v = vout(o.wet ?? .35, o.bus), bp = ac.createBiquadFilter(), [a, b] = up ? [350, 2200] : [2200, 350];
+    bp.type = 'bandpass'; bp.Q.value = .9; bp.frequency.setValueAtTime(a, t); bp.frequency.exponentialRampToValueAtTime(b, t + d); bp.connect(v);
+    v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(g), t + d * .45); v.gain.linearRampToValueAtTime(0, t + d);
+    nz(t, d + .02, bp);
+  }
+
+  // background music: slow crossfading pad chords + sparse marimba drips, all inside the same key
+  const CH = [[38, 50, 57, 62, 64, 66], [35, 47, 54, 59, 62, 66], [31, 43, 50, 57, 59, 62], [33, 45, 52, 57, 59, 64]]; // Dmaj9 · Bm11 · Gadd9 · A6sus4 (first = bass root)
+  const LEN = 12, FADE = 5;
+  function chord(t) {
+    const c = CH[chordI++ % CH.length], lp = ac.createBiquadFilter(), v = ac.createGain(), end = t + LEN + FADE + .1;
+    lp.type = 'lowpass'; lp.Q.value = .3; lp.frequency.setValueAtTime(500, t); lp.frequency.linearRampToValueAtTime(900 + R() * 300, t + LEN * .5); lp.frequency.linearRampToValueAtTime(500, t + LEN + FADE);
+    lp.connect(v); v.connect(mus);
+    v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(1, t + FADE); v.gain.setValueAtTime(1, t + LEN); v.gain.linearRampToValueAtTime(0, t + LEN + FADE);
+    c.forEach((m, i) => {
+      if (!i) { const g = ac.createGain(); g.gain.value = .16; g.connect(v); osc('sine', hz(m), t, end, g); return; }
+      for (const ct of [-6, 6]) { const g = ac.createGain(); g.gain.value = .045; g.connect(lp); osc('triangle', hz(m) * Math.pow(2, ct / 1200), t, end, g); }
+    });
+  }
+  function drip() {
+    if (!musOn) return;
+    if (ac.state === 'running') { const i = 2 + Math.floor(R() * 9), n = R() < .3 ? 2 + Math.floor(R() * 2) : 1;
+      for (let k = 0; k < n; k++) bar(nt(i + k * (R() < .5 ? 1 : 2)), .22, {at:k * (.28 + R() * .2), d:1.6, br:.4, wet:0, bus:mus}); }
+    dripT = setTimeout(drip, 2500 + R() * 5500);
+  }
+  function musStart() {
+    mus.gain.cancelScheduledValues(ac.currentTime); mus.gain.setTargetAtTime(recOn ? MUS * .12 : MUS, ac.currentTime, 1.2);
+    musNext = Math.max(musNext, ac.currentTime + .1); clearInterval(musTick); clearTimeout(dripT);
+    const tick = () => { while (musNext < ac.currentTime + 2) { chord(musNext); musNext += LEN; } };
+    tick(); musTick = setInterval(tick, 1000); dripT = setTimeout(drip, 4000);
+  }
+  function musStop() { mus.gain.cancelScheduledValues(ac.currentTime); mus.gain.setTargetAtTime(0, ac.currentTime, .4); clearInterval(musTick); clearTimeout(dripT); }
+  // duck under the voice while recording (keeps the mic clean)
+  function duck(on) { if (musOn) { mus.gain.cancelScheduledValues(ac.currentTime); mus.gain.setTargetAtTime(on ? MUS * .12 : MUS, ac.currentTime, on ? .15 : 1); } }
+
+  return {
+    unlock: init,
+    get music() { return musOn; },
+    toggleMusic: ev(() => { musOn = !musOn; try { localStorage.setItem('bd_music', musOn ? '1' : '0'); } catch (e) {} if (musOn) musStart(); else musStop(); bar(nt(musOn ? 7 : 2), .3, {d:.8}); hap(6); }),
+    recStart: ev(() => { recOn = true; duck(true); sub(hz(38), .55, {d:.5}); plop(nt(0), .35, {up:1.5, d:.12, at:.02}); hap(16); }),
+    recStop: ev(() => { recOn = false; duck(false); plop(nt(4), .3, {up:2, d:.08}); sub(hz(45), .35, {d:.3, at:.03}); hap([8, 45, 14]); }),
+    saved: ev(() => { [2, 4, 6, 8].forEach((i, k) => bar(nt(i), .26 - k * .03, {at:.06 + k * .075, d:1.4})); sub(hz(50), .3, {at:.04, d:.6}); plop(nt(9), .12, {at:.36}); hap([6, 70, 10]); }),
+    processed: ev(() => { bar(nt(7), .2, {d:1.6}); bar(nt(11), .14, {at:.12, d:1.8, br:.5}); hap(6); }),
+    warn: ev(() => { if (!gate('warn', 2500)) return; bar(nt(-1), .28, {d:.7, br:.3}); bar(nt(-3), .24, {at:.16, d:.9, br:.3}); hap([18, 90, 18]); }),
+    grab: ev(i => { if (!gate('grab', 60)) return; plop(nt(3 + (i % 5)), .16, {up:1.4, d:.05, wet:.05}); hap(4); }),
+    tap: ev(i => { const k = 5 + (i % 7); plop(nt(k), .28, {d:.09}); bar(nt(k), .1, {d:.6, br:.3, at:.01}); hap(6); }),
+    pin: ev(on => { if (on) { sub(hz(50), .4, {d:.35}); bar(nt(5), .26, {d:1.2}); bar(nt(9), .12, {at:.05, d:1.4, br:.5}); hap(14); } else { bar(nt(6), .18, {d:.6}); bar(nt(3), .14, {at:.09, d:.8}); hap(8); } }),
+    merge: ev(() => { plop(nt(2), .3, {up:.55, d:.14}); hap(8); }),
+    absorbed: ev(() => { sub(hz(38), .45, {d:.6, dr:1.3}); bar(nt(0), .14, {at:.03, d:1.2, br:.3}); hap([6, 40, 10]); }),
+    splash: ev(() => { if (recOn || !gate('spl', 45)) return; plop(nt(6 + Math.floor(R() * 8)), .07 + R() * .05, {d:.04 + R() * .03, up:1.6 + R() * .8, wet:.25}); }),
+    dropBack: ev(() => { if (recOn || !gate('db', 70)) return; plop(nt(4 + Math.floor(R() * 6)), .05, {d:.05, up:1.3, wet:.1}); }),
+    toggle: ev(hid => { air(!hid, .05, {d:.5}); plop(nt(hid ? 2 : 5), .12, {at:.18, d:.07}); hap(6); }),
+    mapIn: ev(() => { air(true, .06, {d:.9}); [-5, -3, 0, 2, 4].forEach((i, k) => bar(nt(i), .14, {at:.1 + k * .09, d:1.5, br:.5})); sub(hz(50), .25, {d:.6}); hap(8); }),
+    mapOut: ev(() => { air(false, .06, {d:.8}); [4, 2, 0, -3].forEach((i, k) => bar(nt(i), .13, {at:.05 + k * .08, d:1.3, br:.5})); hap(8); }),
+    node: ev(i => { const k = 3 + (i % 9); bar(nt(k), .2, {d:1}); plop(nt(k + 5), .08, {d:.05, wet:.3}); hap(5); }),
+    fit: ev(() => { air(true, .04, {d:.45}); hap(4); }),
+    cut: ev(() => { if (!gate('cut', 80)) return; plop(nt(9 + Math.floor(R() * 3)), .22, {up:.45, d:.07, wet:.3}); sub(hz(62), .15, {d:.12, dr:2}); hap(12); }),
+  };
+})();
 const $ = s => document.querySelector(s);
 const TAU = Math.PI * 2, PH = $('#phone'), MSG = $('#msg'), MIC = $('#mic'), HINT = $('#hint'), NOTE = $('#note'), LBL = NOTE.firstChild, DEV = $('#dev');
 const TEXTS = ['Call mom back', 'Light as a material', 'Oat milk run', 'Garden: tomatoes south', 'Dentist, the 28th', 'Lease renewal Friday', "Grandpa's boat story", 'Sketch the drop'];
@@ -169,6 +290,7 @@ const QX = {p:0, v:0}, QY = {p:0, v:0};
 let LP = [0, 0], PX = 0, PY = 0, lPX = 0, lPY = 0, lastIn = -1e9, LD = [1, 0], CX = 0, CY = 0, RR = 72, psp = 0, FVX = 0, FVY = 0;
 let drag = null, swipe = null, pts = new Map(), lastEmpty = -1e9, hidden = false, visFrom = 1, visTo = 1, visStart = -1e9, vis = 1;
 let textOrb = null, textShowT = -1e9, dropPulseT = -1e9, corner = [], SEQ = 0;
+let cornerL = [];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = (() => { let s = 11; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
 const hsh = i => { const s = Math.sin(i * 127.1 + 311.7) * 43758.5453; return (s - Math.floor(s)) * 2 - 1; };
@@ -217,7 +339,7 @@ resize();
 function startMic() {
   if (micState !== 'idle') return;
   micState = 'pending';
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micState = 'off'; MIC.style.display = 'block'; return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micState = 'off'; MIC.style.display = 'block'; SFX.warn(); return; }
   navigator.mediaDevices.getUserMedia({audio:true}).then(st => {
     const AC = window.AudioContext || window.webkitAudioContext;
     ctxA = new AC();
@@ -225,7 +347,7 @@ function startMic() {
     ctxA.createMediaStreamSource(st).connect(an);
     tbuf = new Float32Array(an.fftSize); freq = new Uint8Array(an.frequencyBinCount);
     micState = 'on';
-  }).catch(() => { micState = 'off'; MIC.style.display = 'block'; });
+  }).catch(() => { micState = 'off'; MIC.style.display = 'block'; SFX.warn(); });
 }
 function micLevels() {
   an.getFloatTimeDomainData(tbuf);
@@ -247,10 +369,12 @@ function startRec() {
   rec = true; recT0 = performance.now(); shown = -1; sc.t = 1.15; drop = null;
   MSG.classList.add('on');
   startMic();
+  SFX.recStart();
 }
 function stopRec() {
   rec = false; sc.t = 1; drop = {t0:performance.now()};
   MSG.classList.remove('on');
+  SFX.recStop();
   addThought(performance.now());
 }
 function spring(s, dt) {
@@ -265,6 +389,7 @@ function toggle(now) {
   const cur = visNow(now);
   hidden = !hidden; visFrom = cur; visTo = hidden ? 0 : 1; visStart = now;
   if (hidden) textShowT = -1e9;
+  SFX.toggle(hidden);
 }
 function visNow(now) { return visFrom + (visTo - visFrom) * ease(clamp((now - visStart) / 900, 0, 1)); }
 const pt = e => { const r = PH.getBoundingClientRect(); return {x:e.clientX - r.left, y:e.clientY - r.top}; };
@@ -283,16 +408,19 @@ function addThought(now) {
   ORBS.unshift(o);
   const free = ORBS.filter(q => !q.pinned && q.state !== 'leave' && q.state !== 'gone' && q.state !== 'merge');
   for (let i = Math.min(P.maxThoughts, 24 - ORBS.filter(q => q.pinned).length - 1); i < free.length; i++) { const q = free[i]; q.state = 'leave'; q.leaveT = now; q.lx = q.x; q.ly = q.y; }
+  SFX.saved();
 }
 function togglePin(o, now) {
   o.pinned = !o.pinned; if (o.pinned) { o.px = o.x; o.py = o.y; } else { ORBS.splice(ORBS.indexOf(o), 1); ORBS.unshift(o); o.hx = o.x; o.hy = o.y; } o.pulseT = now;
   if (o.pinned) { AUR = {o, t0:now}; addWave(o.x, o.y, P.pinWaveAmp); }
+  SFX.pin(o.pinned);
 }
 function spawnDrop(posAng, velAng, spd) {
   if (DR.length >= Math.min(P.maxDrops, 30)) return;
   const x = CX + Math.cos(posAng) * RR * .9, y = CY + Math.sin(posAng) * RR * .9;
   const r = P.dropMin + (P.dropMax - P.dropMin) * Math.random();
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
+  SFX.splash();
 }
 
 function save() { try { localStorage.setItem('bd_tune_v34', JSON.stringify(P)); } catch (e) {} }
@@ -388,7 +516,9 @@ DEV.addEventListener('pointermove', e => e.stopPropagation());
 DEV.addEventListener('pointerup', e => e.stopPropagation());
 
 PH.addEventListener('pointerdown', e => {
+  SFX.unlock();
   const p = pt(e), now = performance.now();
+  if (p.x < 56 && p.y < 56) { cornerL = cornerL.filter(t => now - t < 900); cornerL.push(now); if (cornerL.length >= 3) { cornerL = []; SFX.toggleMusic(); } return; }
   if (p.x > W - 56 && p.y < 56) { corner = corner.filter(t => now - t < 900); corner.push(now); if (corner.length >= 3) { corner = []; toggleDev(); } return; }
   if (MAP.on) { mapDown(e, p, now); return; }
   pts.set(e.pointerId, p); PX = p.x; PY = p.y; lPX = p.x; lPY = p.y; lastIn = now;
@@ -398,7 +528,7 @@ PH.addEventListener('pointerdown', e => {
       if (o.state !== 'ok') continue;
       const q = orbPos(o);
       if (Math.hypot(p.x - q.x, p.y - q.y) < o.r * o.s + (e.pointerType === 'touch' ? 26 : 14)) {
-        o.grab = true; o.gx = p.x; o.gy = p.y; drag = {id:e.pointerId, o, x0:p.x, y0:p.y, t0:now, moved:0, lp:0, long:false};
+        o.grab = true; o.gx = p.x; o.gy = p.y; drag = {id:e.pointerId, o, x0:p.x, y0:p.y, t0:now, moved:0, lp:0, long:false}; SFX.grab(ORBS.indexOf(o));
         drag.lp = setTimeout(() => { if (drag && drag.o === o && drag.moved < 8) { drag.long = true; togglePin(o, performance.now()); } }, P.pinHold);
         textOrb = o; return;
       }
@@ -427,7 +557,7 @@ window.addEventListener('pointermove', e => {
   drag.o.gx = p.x; drag.o.gy = p.y;
 });
 function end(e) {
-  if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = (MAP.a > P.mapNoReturn && MAP.pull.v > -1) || MAP.pull.v > 1.5 ? 1 : -1; MAP.pull = null; pts.delete(e.pointerId); return; }
+  if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = (MAP.a > P.mapNoReturn && MAP.pull.v > -1) || MAP.pull.v > 1.5 ? 1 : -1; if (MAP.dir > 0) SFX.mapIn(); MAP.pull = null; pts.delete(e.pointerId); return; }
   if (MAP.on) { mapUp(e); return; }
   if (grabP && e.pointerId === grabP.id) {
     if (e.type === 'pointerup' && grabP.moved < (e.pointerType === 'touch' ? 18 : 10) && performance.now() - grabP.t0 < 450) { if (rec) stopRec(); else startRec(); }
@@ -440,18 +570,20 @@ function end(e) {
   const o = drag.o, now = performance.now();
   o.grab = false; clearTimeout(drag.lp);
   if (drag.long) { if (o.pinned) { o.px = o.x; o.py = o.y; } }
-  else if (now - drag.t0 < 200 && drag.moved < 10) { o.pulseT = now; textShowT = now; textOrb = o; }
-  else if (Math.hypot(o.x - CX, o.y - CY) < 60) { o.state = 'merge'; o.pinned = false; o.mT = now; o.mx = o.x; o.my = o.y; textShowT = -1e9; }
+  else if (now - drag.t0 < 200 && drag.moved < 10) { o.pulseT = now; textShowT = now; textOrb = o; SFX.tap(ORBS.indexOf(o)); }
+  else if (Math.hypot(o.x - CX, o.y - CY) < 60) { o.state = 'merge'; o.pinned = false; o.mT = now; o.mx = o.x; o.my = o.y; textShowT = -1e9; SFX.merge(); }
   else { if (o.pinned && drag.moved >= 8) { o.px = o.x; o.py = o.y; } textShowT = -1e9; }
   drag = null;
 }
 window.addEventListener('pointerup', end);
 window.addEventListener('pointercancel', end);
 window.addEventListener('keydown', e => {
+  SFX.unlock();
   if (e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase(), now = performance.now();
   if (k === 'd') { toggleDev(); return; }
-  if (k === 'm') { if (MAP.on && MAP.dir > 0) mapExit(now); else if (!MAP.on || MAP.dir < 0) mapEnter(now); } else if (k === 'escape' && MAP.on) mapExit(now); else if (MAP.on) return; else if (k === 't') toggle(now); else if (k === 'n') addThought(now);
+  if (k === 'b') { SFX.toggleMusic(); return; }
+  if (k === 'm') { if (MAP.on && MAP.dir > 0) mapExit(now); else if (!MAP.on || MAP.dir < 0) { mapEnter(now); SFX.mapIn(); } } else if (k === 'escape' && MAP.on) mapExit(now); else if (MAP.on) return; else if (k === 't') toggle(now); else if (k === 'n') addThought(now);
 });
 setTimeout(() => HINT.classList.add('on'), 0);
 setTimeout(() => HINT.classList.remove('on'), 3000);
@@ -837,7 +969,7 @@ function frame(now) {
     if (d.lost) { d.r = d.r0 * Math.max(0, 1 - d.age / d.life); if (d.age >= d.life) { DR.splice(i, 1); continue; } }
     else if (d.age > P.splashDelay) { d.vx += (cx - d.x) * P.dropReturn * dt; d.vy += (cy - d.y) * P.dropReturn * dt; }
     d.x += d.vx * dt; d.y += d.vy * dt;
-    if (!d.lost && (Math.hypot(d.x - cx, d.y - cy) < P.mergeR * R || d.age > 5)) DR.splice(i, 1);
+    if (!d.lost && (Math.hypot(d.x - cx, d.y - cy) < P.mergeR * R || d.age > 5)) { if (d.age <= 5) SFX.dropBack(); DR.splice(i, 1); }
   }
   birthDebt *= Math.exp(-dt / P.birthRefill);
   const sr = DR.reduce((s, d) => s + d.r * d.r, 0), vol = Math.max(.82, Math.sqrt(Math.max(0, 1 - P.volumeLoss * sr / (R * R)))) * Math.sqrt(1 - birthDebt);
@@ -900,7 +1032,7 @@ function frame(now) {
     if (o.state === 'merge') {
       const u = clamp((now - o.mT) / 400, 0, 1);
       o.x = o.mx + (CX - o.mx) * u; o.y = o.my + (CY - o.my) * u; o.s = 1 - u;
-      if (u >= 1) { o.state = 'gone'; o.goneT = now; dropPulseT = now; }
+      if (u >= 1) { o.state = 'gone'; o.goneT = now; dropPulseT = now; SFX.absorbed(); }
       continue;
     }
     if (o.state === 'gone') { if (now - o.goneT > 1500) { o.state = 'back'; o.s = 0; o.goneT = now; o.x = hx; o.y = hy; o.vx = o.vy = 0; } continue; }
@@ -1083,7 +1215,7 @@ function mapEnter(now, manual) {
   drag = null; swipe = null; grabP = null; pts.clear(); NOTE.classList.remove('on');
   MAP.hint.classList.add('on'); setTimeout(() => MAP.hint.classList.remove('on'), 3200);
 }
-function mapExit(now) { MAP.dir = -1; MAP.lab = null; MAP.pinch = null; MAP.pan = null; MAP.ct = null; MAP.hint.classList.remove('on'); }
+function mapExit(now) { MAP.dir = -1; MAP.lab = null; MAP.pinch = null; MAP.pan = null; MAP.ct = null; MAP.hint.classList.remove('on'); SFX.mapOut(); }
 function mapPhys(dt, settle) {
   const N = MAP.N, G = MAP.G;
   for (const g of G) { g.cx = 0; g.cy = 0; g.n = 0; }
@@ -1157,20 +1289,20 @@ function mapMove(e) {
   if (!s.cut && s.y0 > H * .55 && s.y0 - p.y > 24 && Math.abs(p.x - s.x0) < (s.y0 - p.y) * .7) { MAP.stroke = null; MAP.back2 = {id:e.pointerId, y0:s.y0 - 24, t:now, v:0}; MAP.dir = 0; MAP.lab = null; return; }
   const dd = Math.hypot(p.x - s.x, p.y - s.y), sp = dd / Math.max(1, now - s.t) * 1000;
   s.moved = Math.max(s.moved, Math.hypot(p.x - s.x0, p.y - s.y0));
-  if (sp > P.mapCutSpeed && dd > 2 && mapCut(s.x, s.y, p.x, p.y, now)) s.cut = true;
+  if (sp > P.mapCutSpeed && dd > 2 && mapCut(s.x, s.y, p.x, p.y, now)) { s.cut = true; SFX.cut(); }
   s.x = p.x; s.y = p.y; s.t = now;
 }
 function mapUp(e) {
   const s = MAP.stroke, now = performance.now();
-  if (MAP.back2 && MAP.back2.id === e.pointerId) { MAP.dir = (MAP.a < 1 - P.mapNoReturn && MAP.back2.v < 1) || MAP.back2.v < -1.5 ? -1 : 1; MAP.back2 = null; MAP.pts.delete(e.pointerId); return; }
+  if (MAP.back2 && MAP.back2.id === e.pointerId) { MAP.dir = (MAP.a < 1 - P.mapNoReturn && MAP.back2.v < 1) || MAP.back2.v < -1.5 ? -1 : 1; if (MAP.dir < 0) SFX.mapOut(); MAP.back2 = null; MAP.pts.delete(e.pointerId); return; }
   if (s && s.id === e.pointerId && e.type === 'pointerup' && MAP.dir > 0) {
     const p = pt(e);
     if (s.moved < 10 && now - s.t0 < 350) {
       let best = null, bd = 1e9;
       for (const n of MAP.N) { const q = w2s(n.x, n.y), d = Math.hypot(p.x - q[0], p.y - q[1]) - n.r * MAP.cam.z; if (d < bd) { bd = d; best = n; } }
       if (p.y > H - 64 && Math.abs(p.x - W / 2) < 70) { mapExit(now); best = null; }
-      else if (best && bd < (e.pointerType === 'touch' ? 20 : 10)) { MAP.lab = best; MAP.labT = now; MAP.tapT = -1e9; }
-      else { MAP.lab = null; if (now - MAP.tapT < 320) { MAP.ct = mapFit(); MAP.tapT = -1e9; } else MAP.tapT = now; }
+      else if (best && bd < (e.pointerType === 'touch' ? 20 : 10)) { MAP.lab = best; MAP.labT = now; MAP.tapT = -1e9; SFX.node(MAP.N.indexOf(best)); }
+      else { MAP.lab = null; if (now - MAP.tapT < 320) { MAP.ct = mapFit(); MAP.tapT = -1e9; SFX.fit(); } else MAP.tapT = now; }
     } else if (s.y0 > H * .7 && p.y - s.y0 < -110 && Math.abs(p.x - s.x0) < s.y0 - p.y) mapExit(now);
   }
   if (s && s.id === e.pointerId) MAP.stroke = null;

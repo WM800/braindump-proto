@@ -137,17 +137,13 @@ void main(){
   float og2=exp(-max(-(f2-1.)/gn2,0.)/uGR);
   float c1=c;
   c=mix(c,body+rim2+sp2,m2)+og2*(1.-m2)*.08*bw;
-  // filled synapses, two layers: the synapse (merged with the balls, so it grows a small neck) keeps the edge shading
-  // and continues it inward with a tube normal, so its inside is lit like the edge; the ball sits on top, round and dark
+  // filled synapses: same merged field and edge as without fill (so the neck into the ball stays smooth); the edge shading
+  // continues inward with a tube normal, so the inside is lit like the edge, fading out as the ball's own field takes over
   if(uSF>0.){
-    float fb=f2-fs;vec2 Gb=G2-Gs;float gnb=max(length(Gb),1e-4);float bwb=fb>0.?(w2-ws)/fb:0.;float pkb=fb>0.?pw/fb:0.;
-    float mb=smoothstep(-.7,.7,(fb-1.)/gnb);float eb=1.-smoothstep(1.,uOB,fb);
-    vec3 Nb=normalize(vec3(-Gb/gnb*eb*.9,1.));float sb=max(dot(Nb.xy,ld),0.);float kb=bwb+pkb*.5;
-    float cb=.039*bwb+pkb*(.55+.45*sqrt(max(0.,1.-1./max(fb,1.))))+eb*eb*uRim*(.6+1.2*sb*sb*att)*kb+pow(max(dot(Nb,Hv),0.),40.)*.3*eb*(.4+.6*att)*kb;
+    float fb=f2-fs;float wf=smoothstep(.15,.5,fs)*(1.-smoothstep(.35,1.,fb));
     float ax=1.-1./sqrt(max(fs,1.));vec3 Nf=normalize(vec3(-Gs/max(length(Gs),1e-4)*.9*(1.-ax),1.));float sf=max(dot(Nf.xy,ld),0.);
     float fill=uRim*(.6+1.2*sf*sf*att)*bw*mix(1.,uSF,ax)+pow(max(dot(Nf,Hv),0.),40.)*.3*(.4+.6*att)*bw;
-    float cl=mix(body+rim2+sp2,body+max(rim2,fill)+sp2,smoothstep(.15,.5,fs));
-    c=mix(c1,mix(cl,cb,mb),m2)+og2*(1.-m2)*.08*bw;}
+    c=mix(c1,body+max(rim2,fill*wf)+sp2,m2)+og2*(1.-m2)*.08*bw;}
   for(int i=0;i<4;i++){vec4 g=uGlow[i];if(g.w<=0.)continue;float d=length(p-g.xy);c+=g.w*(exp(-d/g.z)+.12*exp(-d/(5.*g.z)));}
   if(uAura.w>0.){float d=length(p-uAura.xy);c+=uAura.w*(exp(-d/uAura.z)+.12*exp(-d/(5.*uAura.z)));}
   gl_FragColor=vec4(vec3(c),1.);

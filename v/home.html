@@ -26,6 +26,7 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 #mic{position:absolute;left:0;right:0;bottom:24px;text-align:center;font-size:11px;color:#444;display:none;pointer-events:none}
 #hint{position:absolute;left:0;right:0;top:48px;text-align:center;font-size:11px;color:#333;opacity:0;transition:opacity 1s;pointer-events:none}
 #hint.on{opacity:1}
+#fps{position:absolute;left:8px;top:6px;font:10px/1.2 ui-monospace,Consolas,monospace;color:rgba(255,255,255,.55);pointer-events:none;display:none;white-space:pre}
 #note{position:absolute;left:0;top:0;max-width:200px;font:13px/1.35 system-ui,"Segoe UI",sans-serif;letter-spacing:.01em;text-align:center;color:rgba(255,255,255,.66);text-shadow:0 0 14px #000;pointer-events:none}
 #note i{display:block;font-style:normal;opacity:0;transform:translateY(6px);transition:opacity .22s,transform .22s}
 #note.on i{opacity:1;transform:none}
@@ -53,6 +54,7 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
   <div id="msg"></div>
   <div id="mic">mic off</div>
   <div id="note"><i></i></div>
+  <div id="fps"></div>
 </div>
 <div id="dev"></div>
 <script>
@@ -283,7 +285,7 @@ const P0 = {
   // finger in thick water: gentle when slow, strong (can split the core) when fast
   fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:4, fragHealK:2.5, healZeta:.38, mergeV:6, mergeD:.6, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
-  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, ripAmp:.6, trlAmp:.55, trlLife:1.1, ripLife:2.4, ripSpeed:170, ripStep:34,
+  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, fps:0, adMin:.55, ripAmp:.6, trlAmp:.55, trlLife:1.4, wkSpeed:85, ripLife:2.4, ripSpeed:170, ripStep:34,
   // light
   lightLag:.25, lampH:340, lampZ:70, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
@@ -291,14 +293,14 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, synSoftLo:.25, synSoftHi:.85, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:3.5, mapRes:.7, synTear:1.1, mapRest:6, mapDragK:16, mapDragMax:80, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, synSoftLo:.25, synSoftHi:.85, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:3.5, mapRes:.7, synTear:.83, mapRest:6, mapDragK:16, mapDragMax:80, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
 try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v34')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
 uniform vec2 uRes;uniform float uDpr,uRim,uGR,uK,uWL;uniform vec2 uLD,uLP;uniform float uLH,uLZ,uNB,uNM,uSep,uEB,uOB,uMW,uLG;uniform vec4 uB[40];
-uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];uniform vec4 uR[12];uniform vec4 uT[40];
+uniform vec4 uM[56];uniform float uPin[28];uniform vec4 uS[40];uniform vec4 uSR[20];uniform float uNS,uSF;uniform vec4 uAura;uniform vec4 uGlow[4];uniform vec4 uW[6];uniform vec4 uR[12];uniform vec4 uT[40];uniform float uNR,uNT;
 void main(){
   vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y)/uDpr;vec2 p0=p;
   for(int i=0;i<6;i++){vec4 w=uW[i];if(w.w<=0.)continue;vec2 dv=p-w.xy;float d=max(length(dv),1.);float x=(d-w.z)/uWL;p+=dv/d*w.w*sin(x*6.2832)*exp(-x*x*2.);}
@@ -364,16 +366,16 @@ void main(){
   for(int i=0;i<4;i++){vec4 g=uGlow[i];if(g.w<=0.)continue;float d=length(p-g.xy);c+=g.w*(exp(-d/g.z)+.12*exp(-d/(5.*g.z)));}
   if(uAura.w>0.){float d=length(p-uAura.xy);c+=uAura.w*(exp(-d/uAura.z)+.12*exp(-d/(5.*uAura.z)));}
   // liquid film over the whole background: finger-born rings, lit from the upper left by the slope of the surface (no darkening, so text stays clear)
-  float rg=0.;for(int i=0;i<12;i++){vec4 r=uR[i];if(r.w<=0.)continue;vec2 dv=p0-r.xy;float d=max(length(dv),1.);float x=(d-r.z)/34.;float e=exp(-x*x*1.4);float s=6.2832*x;
+  float rg=0.;for(int i=0;i<12;i++){if(float(i)>=uNR)break;vec4 r=uR[i];if(r.w<=0.)continue;vec2 dv=p0-r.xy;float d=max(length(dv),1.);float x=(d-r.z)/34.;float e=exp(-x*x*1.4);float s=6.2832*x;
     rg+=r.w*e*(6.2832*cos(s)-2.8*x*sin(s))*dot(dv/d,vec2(-.7071,-.7071))/34.*inversesqrt(1.+d*.012);}
   // finger wake: one continuous groove along the path (overlapping soft bumps), spreading and fading with age
-  float tg=0.;for(int i=0;i<40;i++){vec4 t=uT[i];if(t.z<=0.)continue;vec2 dv=p0-t.xy;float d2=dot(dv,dv);float sg=16.+34.*t.w;if(d2>sg*sg*5.)continue;float d=max(sqrt(d2),1.);float h=exp(-d2/(sg*sg));
-    tg+=t.z*h*(d/(sg*sg))*(.6+.4*dot(dv/d,vec2(-.7071,-.7071)));}
-  c+=clamp(rg*.75+tg*.9,0.,1.)*(1.-.75*max(m,m2));
+  float tg=0.;for(int i=0;i<40;i++){if(float(i)>=uNT)break;vec4 t=uT[i];if(t.z<=0.)continue;vec2 dv=p0-t.xy;float d2=dot(dv,dv);float rr=t.w+40.;if(d2>rr*rr)continue;float d=max(sqrt(d2),1.);float x=(d-t.w)/15.;float e=exp(-x*x*1.2);float s=6.2832*x;
+    tg+=t.z*e*(-2.4*x*cos(s)-6.2832*sin(s))/15.*dot(dv/d,vec2(-.7071,-.7071))*inversesqrt(1.+d*.03);}
+  c+=clamp(rg*.75+max(tg,0.)*.5,0.,1.)*(1.-.75*max(m,m2));
   gl_FragColor=vec4(vec3(c),1.);
 }`;
 
-let resScale = 1, W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
+let adScale = 1, resScale = 1, W = 0, H = 0, DPR = 1, T = 0, last = performance.now(), br = 0;
 let lvl = 0, avg = 0, rimS = .45, grS = 18, rv = 0, spAcc = 0, tearCd = 0, shoutEnd = -1e9;
 const PB = [0, 0, 0, 0, 0, 0], FX = [0, 0, 0, 0, 0, 0], BF = [0, 0, 0, 0, 0, 0], BP2 = [.1, .1, .1, .1, .1, .1];
 let envS = 0, puff = 0, toneS = 0;
@@ -420,12 +422,12 @@ function makeView() {
   g.bindBuffer(g.ARRAY_BUFFER, g.createBuffer());
   g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
   const at = g.getAttribLocation(pr, 'a'); g.enableVertexAttribArray(at); g.vertexAttribPointer(at, 2, g.FLOAT, false, 0, 0);
-  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uLZ','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uR','uT','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
+  ['uRes','uDpr','uRim','uGR','uB','uLD','uLP','uLH','uLZ','uNB','uNM','uSep','uEB','uOB','uMW','uLG','uM','uPin','uAura','uGlow','uW','uR','uT','uNR','uNT','uK','uWL','uS','uSR','uNS','uSF'].forEach(n => v.L[n] = g.getUniformLocation(pr, n));
   return v;
 }
 const HV = makeView();
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 2) * resScale; W = PH.clientWidth; H = PH.clientHeight;
+  DPR = Math.min(window.devicePixelRatio || 1, 2) * resScale * adScale; W = PH.clientWidth; H = PH.clientHeight;
   HV.cv.width = Math.round(W * DPR); HV.cv.height = Math.round(H * DPR);
   HV.cv.style.width = W + 'px'; HV.cv.style.height = H + 'px';
 }
@@ -501,7 +503,7 @@ function addRip(x, y, amp) {
 function ripUpload(now) {
   const R = HV.R; R.fill(0); const Tt = HV.T; Tt.fill(0);
   for (let i = TR.length - 1; i >= 0; i--) if (now - TR[i].t0 > P.trlLife * 1000) TR.splice(i, 1);
-  TR.forEach((q, i) => { const u = (now - q.t0) / 1000 / P.trlLife; Tt.set([q.x, q.y, q.amp * (1 - u) * (1 - u), u], i * 4); });
+  TR.forEach((q, i) => { const u = (now - q.t0) / 1000 / P.trlLife; Tt.set([q.x, q.y, q.amp * (1 - u) * (1 - u), P.wkSpeed * u * P.trlLife + 3], i * 4); });
   for (let i = RP.length - 1; i >= 0; i--) {
     const q = RP[i], u = (now - q.t0) / 1000 / P.ripLife;
     if (u >= 1) { RP.splice(i, 1); continue; }
@@ -515,6 +517,7 @@ function ripMove(e, q, nw) {
   if (!l) { RPL.set(e.pointerId, {x:q.x, y:q.y, t:nw, acc:0}); return; }
   const dd = Math.hypot(q.x - l.x, q.y - l.y), sp = dd / Math.max(1, nw - l.t) * 1000, amp = P.trlAmp * clamp(.3 + sp / 1400, .3, 1), n = Math.floor((l.acc + dd) / 8);
   for (let k = 1; k <= n; k++) { const f = (k * 8 - l.acc) / dd; if (TR.length >= 40) TR.shift(); TR.push({x:l.x + (q.x - l.x) * f, y:l.y + (q.y - l.y) * f, amp, t0:nw - (1 - f) * (nw - l.t)}); }
+  window.rippleSpeed = sp; window.rippleAmp = amp; // for the sound session: finger speed (px/s) and wake amplitude
   l.acc = (l.acc + dd) - n * 8; l.x = q.x; l.y = q.y; l.t = nw;
 }
 // waves: expanding rings that bend space (shader) and nudge every particle they pass
@@ -547,7 +550,7 @@ function spawnDrop(posAng, velAng, spd) {
 
 function save() { try { localStorage.setItem('bd_tune_v34', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
-const BOOL = {synFill:1};
+const BOOL = {synFill:1, fps:1};
 const INT = {maxThoughts:9, maxDrops:30, dendN:5};
 const META = Object.keys(P0).map(k => {
   const v = P0[k], mx = INT[k] || (v === 0 ? 1 : v <= 1 ? Math.max(1, v * 3) : v * 3);
@@ -555,6 +558,7 @@ const META = Object.keys(P0).map(k => {
 });
 // readable names for the tuning keys (the keys themselves stay as they are in P0)
 const DEV_NAMES = {
+  fps:'Licznik FPS (lewy górny róg)', mapRes:'Rozdzielczość mapy (×DPR)', adMin:'Min. rozdzielczość adaptacyjna', wkSpeed:'Prędkość fal kilwateru', trlAmp:'Siła kilwateru', trlLife:'Czas życia kilwateru', synTear:'Próg zerwania synapsy',
   coreY:'Położenie kuli w pionie', coreScale:'Wielkość kuli', partDrift:'Dryf części kuli', idleSpin:'Obrót w spoczynku', kShape:'Sztywność kształtu', dampR:'Tłumienie ruchu', recLoose:'Luz powrotu do kształtu', kLink:'Siła połączeń', lobeMax:'Maks. wypukłość płatów', recShrink:'Kurczenie przy powrocie', petalMax:'Maks. rozmiar płatków', leashK:'Sprężystość smyczy', sharp:'Ostrość granic (1 = miękko)', smallLight:'Światło małych części',
   onsetKick:'Siła impulsu przy dźwięku', agcFloor:'Minimalne wzmocnienie', agcPeak:'Szczytowe wzmocnienie', puffK:'Siła pufów', bandPush:'Odpychanie pasmami', toneStretch:'Rozciąganie tonem', shiver:'Drżenie', centerK:'Siła powrotu do środka', lvlAtk:'Narastanie głośności', lvlRel:'Opadanie głośności', bandAtk:'Narastanie pasma', bandRel:'Opadanie pasma', onsetGap:'Odstęp między impulsami', onsetRatio:'Próg wykrycia impulsu', onsetMin:'Minimalna siła impulsu', voiceWave:'Fala głosu', voiceWaveGap:'Odstęp fal głosu', toneSwirl:'Wirowanie tonem', maxStretch:'Maks. rozciągnięcie', followMax:'Maks. podążanie za dźwiękiem',
   grabPull:'Siła przyciągania palcem', grabLoose:'Luz przy chwytaniu', fingerR:'Promień palca', cutR:'Promień cięcia', cutEase:'Płynność cięcia', cutIn:'Cięcie – wejście', cutOut:'Cięcie – wyjście', scarLife:'Czas życia blizny', scarSpeed:'Prędkość blizny', scarPush:'Odpychanie przez bliznę', cutSpeed:'Próg szybkiego cięcia', cutGap:'Odstęp po cięciu', cutImpulse:'Impuls cięcia', cutDrag:'Opór przy cięciu', cutHold:'Czas trzymania cięcia', cutHeal:'Szybkość zabliźniania', fingerPush:'Siła pchnięcia palcem', fingerDrag:'Opór palca', fingerFast:'Próg szybkiego palca', tearSpeed:'Próg rozerwania', tearCool:'Czas ostygnięcia rozerwania', fastFlee:'Ucieczka przy szybkim ruchu', orbCutSpeed:'Próg cięcia kuli', orbSplit:'Podział kuli', orbHeal:'Gojenie kuli',
@@ -577,7 +581,7 @@ const DEV_CATS = [
   ['Światło', ['lightLag','lampH','lampZ','idleR','idleT','idleBlend','wanderAmp','wanderSpeed','lightGain','rimBand','rimMinPx','rimGain','orbBand','orbLevel','glowI']],
   ['Myśli', ['topY','bottomY','spread','yCurve','jitter','jitterY','newB','oldB','homeK','homeRate','homeGap','homePull','gapBreath','wander','stagger','repel','cohesion','tailK','tailC','arriveT','leaveT','leaveDim','edgeFade','maxThoughts','labelGap']],
   ['Pinezki', ['pinHold','pinRim','pinInner','pinFric','pinPush','auraI','auraScale','auraDur','dropAnim','birthR','detachK','birthDim','birthVol','birthRefill']],
-  ['Mapa myśli', ['mapNodeR','mapRepel','mapGroupK','mapPull','mapDamp','mapDrift','mapPanFric','mapEnter','mapExit','mapPullLen','mapNoReturn','mapCutSpeed','shakeTh']],
+  ['Mapa myśli', ['fps','mapRes','adMin','wkSpeed','trlAmp','trlLife','mapNodeR','mapRepel','mapGroupK','mapPull','mapDamp','mapDrift','mapPanFric','mapEnter','mapExit','mapPullLen','mapNoReturn','mapCutSpeed','shakeTh']],
   ['Synapsy', ['synW','synFill','synFillI','synInset','synIn','synOut','synLen','synK','synCross','synRetract','synRegrow','synSoftLo','synSoftHi']],
   ['Etykiety', ['mapLabelZ','groupLabelZ']]
 ];
@@ -726,7 +730,7 @@ function draw() {
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH); g.uniform1f(L.uLZ, P.lampZ);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0); g.uniform2f(L.uSSm, P.synSoftLo, P.synSoftHi);
   g.uniform4fv(L.uGlow, HV.GL); g.uniform4fv(L.uAura, HV.AU); g.uniform4fv(L.uW, HV.WU);
-  ripUpload(performance.now()); g.uniform4fv(L.uR, HV.R); g.uniform4fv(L.uT, HV.T);
+  ripUpload(performance.now()); g.uniform4fv(L.uR, HV.R); g.uniform4fv(L.uT, HV.T); g.uniform1f(L.uNR, RP.length); g.uniform1f(L.uNT, TR.length);
   g.drawArrays(g.TRIANGLES, 0, 3);
 }
 
@@ -911,7 +915,22 @@ function cutLink(a, b) {
   return Math.hypot(a.x + ex * t - PX, a.y + ey * t - PY) < P.cutR * cutS;
 }
 
+const FPSE = $('#fps'); let fpsN = 0, fpsT = 0, fpsMax = 0, fpsLast = 0;
+function fpsTick(now) {
+  if (!P.fps) { if (FPSE.style.display) FPSE.style.display = ''; return; }
+  FPSE.style.display = 'block'; const dt = now - fpsLast; fpsLast = now; fpsN++; if (dt < 1000) fpsMax = Math.max(fpsMax, dt);
+  if (now - fpsT > 500) { FPSE.textContent = Math.round(fpsN * 1000 / (now - fpsT)) + ' fps · worst ' + Math.round(fpsMax) + ' ms · res ' + (adScale * resScale).toFixed(2); fpsN = 0; fpsT = now; fpsMax = 0; }
+}
+// adaptive resolution: the field shader is fill-rate bound, so when frames run well under the display's rate the canvas renders fewer pixels (never rises again, no flapping)
+let adEma = 16, adMin = 1e9, adT = 0, adLast = 0;
+function adaptRes(now) {
+  const dt = now - adLast; adLast = now; if (dt <= 0 || dt > 250) return;
+  adEma += (dt - adEma) * .05; if (adEma > 5) adMin = Math.min(adMin, adEma);
+  if (now - adT < 1500 || adScale <= P.adMin) return;
+  if (adEma > 24 || (adEma > 13 && adEma > adMin * 1.5)) { adScale = Math.max(P.adMin, adScale - .1); adT = now; adMin = 1e9; adEma *= .75; resize(); }
+}
 function frame(now) {
+  fpsTick(now); adaptRes(now);
   if (MAP.on && MAP.a >= 1) { T += clamp((now - last) / 1000, 0, 1 / 30); last = now; mapFrame(now); draw(); requestAnimationFrame(frame); return; }
   const dt = clamp((now - last) / 1000, 0, 1 / 30); last = now; T += dt;
   spring(sc, dt);
@@ -1329,7 +1348,7 @@ function mapBuild() {
   }
   for (let s = 0; s < 300; s++) mapPhys(1 / 60, true);
   for (const n of N) { n.rx = n.x; n.ry = n.y; }
-  for (const l of MAP.L) l.d0 = Math.max(1, Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y));
+  for (const l of MAP.L) { l.d0 = Math.max(1, Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y)); l.tt = tearVar(l.k); }
   // group labels
   MAP.lay.innerHTML = '';
   for (const G of groups) { const d = document.createElement('div'); d.className = 'g'; d.textContent = G.name; MAP.lay.append(d); G.el = d; }
@@ -1362,9 +1381,9 @@ function mapPhys(dt, settle) {
   }
   const dn = !settle && MAP.dn;
   if (dn) {
-    // the finger pulls through a rubber band: the farther it goes the less the blob follows, while synapses and the rest spring pull back harder
-    const n = dn.n, c = MAP.cam, tx = (dn.gx - c.x) / c.z + dn.ox, ty = (dn.gy - c.y) / c.z + dn.oy, dx = tx - n.x, dy = ty - n.y, m = Math.max(.01, Math.hypot(dx, dy)), lim = Math.max(10, P.mapDragMax), e = lim * Math.tanh(m / lim);
-    n.ax += dx / m * e * P.mapDragK; n.ay += dy / m * e * P.mapDragK;
+    // the held blob goes exactly where the finger is (no pull toward neighbours); its synapses stretch, thin and tear, the rest follows through them
+    const n = dn.n, c = MAP.cam, tx = (dn.gx - c.x) / c.z + dn.ox, ty = (dn.gy - c.y) / c.z + dn.oy, lim = Math.max(10, P.mapDragMax);
+    n.x = tx; n.y = ty; n.vx = n.vy = 0; n.ax = n.ay = 0;
     dn.str = Math.hypot(n.x - n.rx, n.y - n.ry); dn.maxStr = Math.max(dn.maxStr, dn.str);
     if (!dn.tore && dn.str > lim * .7) dn.tore = true;
   }
@@ -1377,15 +1396,16 @@ function mapPhys(dt, settle) {
   let tmx = 0; // highest synapse tension while dragging (1 = tears) drives the stretch sound
   for (const l of MAP.L) {
     const A = l.a, B = l.b, dx = B.x - A.x, dy = B.y - A.y, d = Math.max(1, Math.hypot(dx, dy));
-    if (MAP.dn && l.st === 'ok' && !settle && l.d0) tmx = Math.max(tmx, (d / l.d0 - 1) / P.synTear);
-    if (MAP.dn && l.st === 'ok' && !settle && l.d0 && d / l.d0 - 1 > P.synTear) { mapSever(l, .5, performance.now(), d); SFX.tear(w2s((A.x + B.x) / 2, (A.y + B.y) / 2)[0] / W); }
+    const held = MAP.dn && (l.a === MAP.dn.n || l.b === MAP.dn.n), thr = P.synTear * (l.tt || 1);
+    if (held && l.st === 'ok' && !settle && l.d0) tmx = Math.max(tmx, (d / l.d0 - 1) / thr);
+    if (held && l.st === 'ok' && !settle && l.d0 && d / l.d0 - 1 > thr) { mapSever(l, .5, performance.now(), d); SFX.tear(w2s((A.x + B.x) / 2, (A.y + B.y) / 2)[0] / W); }
     const kf = l.st === 'ok' ? 1 : (l.reg || 0); if (kf <= 0) continue;
     const f = kf * P.synK * (l.x ? P.synCross : 1) * (d - P.synLen * (l.x ? 2.6 : 1.4 - .6 * l.s) - A.r - B.r) * .1;
     A.ax += dx / d * f; A.ay += dy / d * f; B.ax -= dx / d * f; B.ay -= dy / d * f;
   }
   if (MAP.dn && !settle) SFX.stretch(tmx);
   const dmp = Math.exp(-P.mapDamp * dt);
-  for (const n of N) { n.vx = (n.vx + n.ax * dt) * dmp; n.vy = (n.vy + n.ay * dt) * dmp; n.x += n.vx * dt; n.y += n.vy * dt; }
+  for (const n of N) { if (dn && n === dn.n) continue; n.vx = (n.vx + n.ax * dt) * dmp; n.vy = (n.vy + n.ay * dt) * dmp; n.x += n.vx * dt; n.y += n.vy * dt; }
 }
 function mapZoomAt(f, sx, sy) {
   const c = MAP.cam, z = clamp(c.z * f, .25, 12), wx = (sx - c.x) / c.z, wy = (sy - c.y) / c.z;
@@ -1480,6 +1500,7 @@ function mapSever(l, u, now, d) {
   l.rl = (700 + 2600 * Math.random()) * (.6 + .6 * dn) * (.8 + .4 * sz);
   l.rc = .75 + 1.15 * Math.random();
 }
+const tearVar = k => .8 + .4 * Math.abs(hsh(k * 5.3));
 function mapCut(x0, y0, x1, y1, now) {
   let hit = false;
   for (const l of MAP.L) {

@@ -35,7 +35,10 @@ canvas{position:absolute;left:0;top:0;display:block;pointer-events:none;touch-ac
 #dev label{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin-bottom:6px}
 #dev input{grid-column:1/3;width:100%}
 #dev input[type=search]{margin:8px 0 2px;padding:7px 9px;border:0;border-radius:8px;background:#2a2a2a;color:#ddd;font:12px system-ui,"Segoe UI",sans-serif;outline:none}
-#dev .dc{font:600 10px system-ui,"Segoe UI",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#777;margin:12px 0 4px}
+#dev .dc{font:600 10px system-ui,"Segoe UI",sans-serif;letter-spacing:.08em;text-transform:uppercase;color:#888;margin:10px 0 2px;padding:6px 2px;cursor:pointer;user-select:none}
+#dev .dc:hover{color:#ddd}
+#dev label.hit{background:rgba(255,255,255,.1);border-radius:8px;padding:4px 6px;margin-left:-6px;margin-right:-6px;box-shadow:inset 2px 0 0 #fff}
+#dev label.hit span:first-child{color:#fff}
 #dev button{font:11px system-ui,"Segoe UI",sans-serif;color:#ddd;background:#2a2a2a;border:0;border-radius:8px;padding:6px 8px;margin:4px 4px 0 0}
 </style>
 </head>
@@ -77,9 +80,9 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapNodeR:1, synW:1.8, synFill:1, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:1.8, synFill:0, synFillI:1.6, synInset:.8, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.6, mapExit:1.4, mapPullLen:.6, mapNoReturn:.35, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
-try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v35')) || {}); } catch (e) {}
+try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v34')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
 // FROM core6/home9 — shading verbatim; additions: wave bend of p, field sharpness uK (1 = original), per-ball light weight b.w, exponential aura
 const FS = `precision highp float;
@@ -117,9 +120,9 @@ void main(){
   float rim=edge*edge*uRim*(.6+uLG*side*side*att)*lwn*(1.-.3*max(uSep,0.));
   float sp=pow(max(dot(N,Hv),0.),40.)*.3*edge*lwn*(.4+.6*att);
   float c=mix(0.,.039+rim+sp,m)+og*(1.-m)*.08*lwn;
-  float f2=0.,w2=0.,pw=0.,fs=0.,ws=0.,th=0.;vec2 G2=vec2(0.),tn=vec2(0.);
+  float f2=0.,w2=0.,pw=0.,fs=0.;vec2 G2=vec2(0.);
   for(int i=0;i<56;i++){if(float(i)>=uNM)break;vec4 b=uM[i];if(b.z<=0.)continue;vec2 dv=p-b.xy;float d2=max(dot(dv,dv),1.);float c2=b.z*b.z/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*b.w;pw+=c2*uPin[i/2];}
-  for(int i=0;i<40;i++){if(float(i)>=uNS)break;vec4 s=uS[i];vec4 rq=uSR[i/2];vec2 rw=(i-(i/2)*2)==0?rq.xy:rq.zw;vec2 ab=s.zw-s.xy;float t=clamp(dot(p-s.xy,ab)/max(dot(ab,ab),1e-4),0.,1.);vec2 dv=p-s.xy-ab*t;float d2=max(dot(dv,dv),1.);float c2=rw.x*rw.x/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*rw.y;fs+=c2;ws+=c2*rw.y;float lq=length(dv),qq=clamp(lq/max(rw.x,1e-3),0.,1.);tn+=c2*dv/max(lq,1e-4)*qq;th+=c2*sqrt(1.-qq*qq);}
+  for(int i=0;i<40;i++){if(float(i)>=uNS)break;vec4 s=uS[i];vec4 rq=uSR[i/2];vec2 rw=(i-(i/2)*2)==0?rq.xy:rq.zw;vec2 ab=s.zw-s.xy;float t=clamp(dot(p-s.xy,ab)/max(dot(ab,ab),1e-4),0.,1.);vec2 dv=p-s.xy-ab*t;float d2=max(dot(dv,dv),1.);float c2=rw.x*rw.x/d2;f2+=c2;G2-=2.*c2*dv/d2;w2+=c2*rw.y;fs+=c2;}
   float bw=f2>0.?w2/f2:0.;
   float gn2=max(length(G2),1e-4);
   float m2=smoothstep(-.7,.7,(f2-1.)/gn2); // 1px antialiased edge, like the core
@@ -134,8 +137,7 @@ void main(){
   float og2=exp(-max(-(f2-1.)/gn2,0.)/uGR);
   c=mix(c,body+rim2+sp2,m2)+og2*(1.-m2)*.08*bw;
   // filled synapses: where the field is mostly synapse, the whole width takes the lit edge colour; cells stay as they are
-  // synapses are lit tubes: their cross-section normal (outward from the axis, height from the tube's curvature) gives the same lit edge as a cell, filled through the middle
-  if(uSF>0.&&fs>0.){vec3 NT=normalize(vec3(tn/fs,max(th/fs,.05)));float bS=ws/fs,sT=max(dot(NT.xy,ld),0.),sf=smoothstep(.5,.95,fs/f2);float fcT=uRim*(.6+1.2*sT*sT*att)*bS*uSF;float spT=pow(max(dot(NT,Hv),0.),40.)*.3*(.4+.6*att)*bS;c=mix(c,max(c,fcT+spT),sf*m2);}
+  if(uSF>0.){float sf=f2>0.?fs/f2:0.;sf=smoothstep(.5,.95,sf);float fc=uRim*(.6+1.2*side2*side2*att)*bw*uSF;c=mix(c,max(c,fc+sp2),sf*m2);}
   for(int i=0;i<4;i++){vec4 g=uGlow[i];if(g.w<=0.)continue;float d=length(p-g.xy);c+=g.w*(exp(-d/g.z)+.12*exp(-d/(5.*g.z)));}
   if(uAura.w>0.){float d=length(p-uAura.xy);c+=uAura.w*(exp(-d/uAura.z)+.12*exp(-d/(5.*uAura.z)));}
   gl_FragColor=vec4(vec3(c),1.);
@@ -281,7 +283,7 @@ function spawnDrop(posAng, velAng, spd) {
   DR.push({x, y, vx:Math.cos(velAng) * spd, vy:Math.sin(velAng) * spd, r, r0:r, age:0, lost:Math.random() < P.dropLost, life:.8 + .8 * Math.random()});
 }
 
-function save() { try { localStorage.setItem('bd_tune_v35', JSON.stringify(P)); } catch (e) {} }
+function save() { try { localStorage.setItem('bd_tune_v34', JSON.stringify(P)); } catch (e) {} }
 function toggleDev() { DEV.classList.toggle('on'); if (DEV.classList.contains('on')) buildDev(); }
 const BOOL = {synFill:1};
 const INT = {maxThoughts:9, maxDrops:30, dendN:5};
@@ -317,14 +319,25 @@ const DEV_CATS = [
   ['Synapsy', ['synW','synFill','synFillI','synInset','synIn','synOut','synLen','synK','synCross','synRetract','synRegrow']],
   ['Etykiety', ['mapLabelZ','groupLabelZ']]
 ];
-let devQ = '';
+let devQ = '', devOpen = new Set();
+// no query: categories fold by click (all closed by default); query: matching categories open, matching rows highlighted
 function filterDev() {
-  let cat = null, any = false;
-  for (const el of DEV.children) {
-    if (el.classList.contains('dc')) { if (cat) cat.style.display = any ? '' : 'none'; cat = el; any = false; continue; }
-    if (el.tagName === 'LABEL') { const show = !devQ || el.dataset.s.includes(devQ); el.style.display = show ? '' : 'none'; any = any || show; }
+  for (const g of DEV.querySelectorAll('.dcg')) {
+    const h = g.querySelector('.dc'), body = g.querySelector('.dcb');
+    let hits = 0;
+    for (const l of body.children) {
+      const hit = !devQ || l.dataset.s.includes(devQ);
+      l.style.display = hit ? '' : 'none';
+      l.classList.toggle('hit', !!devQ && hit);
+      if (hit) hits++;
+    }
+    const open = devQ ? hits > 0 : devOpen.has(h.dataset.cat);
+    g.style.display = devQ && !hits ? 'none' : '';
+    body.style.display = open ? '' : 'none';
+    h.textContent = (open ? '▾ ' : '▸ ') + h.dataset.cat + (devQ ? ` (${hits})` : '');
   }
-  if (cat) cat.style.display = any ? '' : 'none';
+  const first = DEV.querySelector('label.hit');
+  if (first) first.scrollIntoView({ block: 'nearest' });
 }
 function buildDev() {
   DEV.innerHTML = '';
@@ -342,7 +355,10 @@ function buildDev() {
   const rest = META.map(m => m[0]).filter(k => !used.has(k));
   if (rest.length) cats.push(['Inne', rest]);
   for (const [cat, keys] of cats) {
-    const h = document.createElement('div'); h.className = 'dc'; h.textContent = cat; DEV.append(h);
+    const g = document.createElement('div'), h = document.createElement('div'), body = document.createElement('div');
+    g.className = 'dcg'; h.className = 'dc'; h.dataset.cat = cat; body.className = 'dcb';
+    h.addEventListener('click', () => { if (devOpen.has(cat)) devOpen.delete(cat); else devOpen.add(cat); filterDev(); });
+    g.append(h, body); DEV.append(g);
     for (const k of keys) {
       const [, mn, mx, st] = byKey[k];
       const l = document.createElement('label'), s = document.createElement('span'), v = document.createElement('span'), r = document.createElement('input');
@@ -350,7 +366,7 @@ function buildDev() {
       if (BOOL[k]) { r.type = 'checkbox'; r.checked = !!P[k]; r.addEventListener('change', () => { P[k] = r.checked ? 1 : 0; v.textContent = P[k]; save(); }); }
       else { r.type = 'range'; r.min = mn; r.max = mx; r.step = st; r.value = P[k];
       r.addEventListener('input', () => { P[k] = +r.value; v.textContent = P[k]; save(); }); }
-      l.append(s, v, r); DEV.append(l);
+      l.append(s, v, r); body.append(l);
     }
   }
   filterDev();

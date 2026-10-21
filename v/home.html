@@ -449,7 +449,8 @@ window.addEventListener('pointercancel', end);
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase(), now = performance.now();
-  if (k === 'm') { if (MAP.on && MAP.dir > 0) mapExit(now); else if (!MAP.on || MAP.dir < 0) mapEnter(now); } else if (k === 'escape' && MAP.on) mapExit(now); else if (MAP.on) return; else if (k === 't') toggle(now); else if (k === 'd') toggleDev(); else if (k === 'n') addThought(now);
+  if (k === 'd') { toggleDev(); return; }
+  if (k === 'm') { if (MAP.on && MAP.dir > 0) mapExit(now); else if (!MAP.on || MAP.dir < 0) mapEnter(now); } else if (k === 'escape' && MAP.on) mapExit(now); else if (MAP.on) return; else if (k === 't') toggle(now); else if (k === 'n') addThought(now);
 });
 setTimeout(() => HINT.classList.add('on'), 0);
 setTimeout(() => HINT.classList.remove('on'), 3000);

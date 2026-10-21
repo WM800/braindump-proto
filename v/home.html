@@ -75,7 +75,7 @@ const P0 = {
   // pin: stays where dropped, slow soft aura + wave
   pinHold:500, pinRim:0, pinInner:.3, pinFric:8, pinPush:2, auraI:.5, auraScale:.9, auraDur:2.4, glowI:.1, dropAnim:0, birthR:1.6, detachK:2.6, birthDim:4, birthVol:.1, birthRefill:4, orbLevel:.5, rimBand:1.55, orbBand:2.2, rimMinPx:13, rimGain:2.1, lightGain:1.9,  birthPull:5,
   // thought map: the home thoughts walk into a map of cells joined by soft metaball bridges, shaded exactly like the core
-  mapNodeR:1, synW:2.2, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:1.3, mapExit:1.2, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
+  mapNodeR:1, synW:2.2, synIn:1, synOut:.45, synLen:70, synK:4, synCross:.12, mapRepel:8000, mapGroupK:.08, mapPull:.02, mapDamp:4, mapDrift:3, mapCutSpeed:550, synRetract:.7, synRegrow:7, mapEnter:2.8, mapExit:1.4, mapPanFric:4, shakeTh:16, mapLabelZ:1.8, groupLabelZ:1};
 const P = Object.assign({}, P0);
 try { Object.assign(P, JSON.parse(localStorage.getItem('bd_tune_v31')) || {}); } catch (e) {}
 const VS = 'attribute vec2 a;void main(){gl_Position=vec4(a,0.,1.);}';
@@ -325,7 +325,7 @@ PH.addEventListener('pointerdown', e => {
   lastEmpty = now;
 });
 window.addEventListener('pointermove', e => {
-  if (MAP.pull && e.pointerId === MAP.pull.id) { const p = pt(e), now = performance.now(), a = clamp((p.y - MAP.pull.y0) / (H * .5), 0, 1); MAP.pull.v = (a - MAP.a) / Math.max(.001, (now - MAP.pull.t) / 1000); MAP.pull.t = now; MAP.a = a; return; }
+  if (MAP.pull && e.pointerId === MAP.pull.id) { const p = pt(e), now = performance.now(), a = clamp((p.y - MAP.pull.y0) / (H * .5), 0, 1) * .45; MAP.pull.v = (a - MAP.a) / Math.max(.001, (now - MAP.pull.t) / 1000); MAP.pull.t = now; MAP.a = a; return; }
   if (MAP.on) { mapMove(e); return; }
   if (pts.has(e.pointerId)) pts.set(e.pointerId, pt(e));
   if (grabP && e.pointerId === grabP.id) { const p = pt(e); grabP.moved = Math.max(grabP.moved, Math.hypot(p.x - grabP.x0, p.y - grabP.y0)); }
@@ -342,7 +342,7 @@ window.addEventListener('pointermove', e => {
   drag.o.gx = p.x; drag.o.gy = p.y;
 });
 function end(e) {
-  if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = MAP.a > .3 || MAP.pull.v > 1.2 ? 1 : -1; MAP.pull = null; pts.delete(e.pointerId); return; }
+  if (MAP.pull && e.pointerId === MAP.pull.id) { MAP.dir = MAP.a > .12 || MAP.pull.v > .5 ? 1 : -1; MAP.pull = null; pts.delete(e.pointerId); return; }
   if (MAP.on) { mapUp(e); return; }
   if (grabP && e.pointerId === grabP.id) {
     if (e.type === 'pointerup' && grabP.moved < (e.pointerType === 'touch' ? 18 : 10) && performance.now() - grabP.t0 < 450) { if (rec) stopRec(); else startRec(); }
@@ -971,6 +971,12 @@ function mapBuild() {
   L.forEach((l, k) => Object.assign(l, {k, ph:hsh(k * 2.9) * TAU, st:'ok', u:.5, tc:0, poly:[]}));
   MAP.L = L;
   MAP.order = N.filter(n => n.o).sort((p, q) => (q.o.pinned ? 1 : 0) - (p.o.pinned ? 1 : 0)).concat(N.filter(n => !n.o));
+  // every new cell buds out of the nearest home thought of its group (groups without one grow in place), nearest first
+  for (const G of groups) {
+    const M = N.filter(n => n.gi === G.gi), seeds = M.filter(n => n.o);
+    for (const n of M) { n.seed = null; n.sd = 0; if (n.o || !seeds.length) continue; let b = seeds[0]; for (const q of seeds) if (dd(n, q) < dd(n, b)) b = q; n.seed = b; n.sd = dd(n, b); }
+    const mx = Math.max(1, ...M.map(n => n.sd)); for (const n of M) n.ord = n.seed ? n.sd / mx : Math.abs(hsh(N.indexOf(n) * 3.7)) * .6;
+  }
   for (let s = 0; s < 300; s++) mapPhys(1 / 60, true);
   // group labels
   MAP.lay.innerHTML = '';
@@ -1109,7 +1115,7 @@ function mapFrame(now) {
   if (!MAP.pan && !MAP.pinch) { cam.x += MAP.vel[0] * dt; cam.y += MAP.vel[1] * dt; const k = Math.exp(-P.mapPanFric * dt); MAP.vel[0] *= k; MAP.vel[1] *= k; }
   if (MAP.ct) { const k = 1 - Math.exp(-dt * 5); cam.z += (MAP.ct.z - cam.z) * k; cam.x += (MAP.ct.x - cam.x) * k; cam.y += (MAP.ct.y - cam.y) * k; if (Math.abs(MAP.ct.z - cam.z) < .002) MAP.ct = null; }
   // the home screen scrolls down and away (the core leaves with it); the same thought orbs stay and walk to their places
-  const hs = sm5(A);
+  const hs = sm5(A / .55);
   MAP.lay.style.opacity = sm5((A - .7) / .3); MAP.back.style.opacity = MAP.dir >= 0 ? sm5((A - .8) / .2) : 0;
   if (A <= 0 && MAP.dir < 0) { MAP.on = false; MAP.dir = 0; HV.NS = 0; MAP.lay.innerHTML = ''; MAP.back.style.opacity = 0; return; }
   mapPhys(dt, false);
@@ -1128,7 +1134,7 @@ function mapFrame(now) {
     const q = w2s(n.x, n.y), o = n.o && ORBS.includes(n.o) ? n.o : null, br = 1 + .03 * Math.sin(T * TAU / 5 + n.ph), wN = P.orbLevel * n.w;
     let x, y, r, g;
     if (o) {
-      g = sm5((A - .05) / .7); const r1 = n.r * z * br; x = q[0]; y = q[1]; r = r1 * 1.28;
+      g = sm5(A / .42); const r1 = n.r * z * br; x = q[0]; y = q[1]; r = r1 * 1.28;
       const h = o.mkT === MAP.hm && o.mk >= 0 ? HM.subarray(o.mk * 8, o.mk * 8 + 8) : [x, y, 0, 0, x, y, 0, 0];
       const vis2 = x > -r * 4 && x < W + r * 4 && y > -r * 4 && y < H + r * 4;
       if (k + 2 <= CAP && (vis2 || g < 1)) {
@@ -1138,8 +1144,9 @@ function mapFrame(now) {
       }
       x = h[0] + (x - h[0]) * g; y = h[1] + (y - h[1]) * g; r = (h[2] * 1.28) + (r - h[2] * 1.28) * g;
     } else {
-      const dc = Math.min(1, Math.hypot(q[0] - W / 2, q[1] - H / 2) / maxR); g = sm5((A - .25 - dc * .3) / .45);
-      x = q[0]; y = q[1] - slide; r = n.r * z * br * 1.28 * g;
+      g = sm5((A - .32 - n.ord * .3) / .36); const sd = n.seed && SP.get(n.seed), full = n.r * z * br * 1.28;
+      if (sd) { x = sd.x + (q[0] - sd.x) * g; y = sd.y + (q[1] - sd.y) * g; r = full * sm5(g * 4) * (.4 + .6 * g); }
+      else { x = q[0]; y = q[1]; r = full * g; }
       if (k < CAP && r > .3 && x > -r * 4 && x < W + r * 4 && y > -r * 4 && y < H + r * 4) { M.set([x, y, r, wN], k * 4); k++; }
     }
     SP.set(n, {x, y, r, g});
@@ -1152,14 +1159,15 @@ function mapFrame(now) {
     S.set([ax, ay, bx, by], ns * 4); SR.set([r, w], ns * 2); ns++;
   };
   for (const l of MAP.L) {
-    const pa = SP.get(l.a), pb = SP.get(l.b), gl = sm5((A - .55 - l.k / MAP.L.length * .15) / .3) * (Math.min(pa.g, pb.g) > .6 ? 1 : 0);
+    const pa = SP.get(l.a), pb = SP.get(l.b), gl = sm5((A - .74 - l.k / MAP.L.length * .1) / .16) * sm5((Math.min(pa.g, pb.g) - .7) / .3);
     l.poly = [];
     if (gl <= 0) continue;
     const dx = pb.x - pa.x, dy = pb.y - pa.y, d = Math.max(1, Math.hypot(dx, dy));
-    const rw = Math.max(.7, P.synW * (.4 + 1.2 * l.s) * Math.pow(z, .8)), w = P.orbLevel * (l.x ? P.synOut : P.synIn);
+    // a synapse appears as a hair-thin thread between two settled cells and thickens (no growing tip)
+    const rw = Math.max(.7, P.synW * (.4 + 1.2 * l.s) * Math.pow(z, .8)) * gl, w = P.orbLevel * (l.x ? P.synOut : P.synIn);
     const at = s => [pa.x + dx * s, pa.y + dy * s];
     l.poly = [[pa.x, pa.y, 0], [pb.x, pb.y, 1]];
-    let ta = gl, tb = 1;
+    let ta = 1, tb = 1;
     if (l.st === 'cut') {
       const e = sm5((now - l.tc) / (Math.max(.1, P.synRetract) * 1000)), sa = Math.min(.45, pa.r * .8 / d), sb = Math.min(.45, pb.r * .8 / d);
       const reg = P.synRegrow > 0 ? sm5((now - l.tc - P.synRegrow * 1000) / 1600) : 0;

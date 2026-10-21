@@ -179,7 +179,8 @@ const hide=()=>{s.style.display='none'};
 const dis=()=>{try{localStorage.setItem(K,Date.now())}catch(e){}hide()};
 document.getElementById('instX').onclick=dis;
 if(sa||!ok())return;
-addEventListener('beforeinstallprompt',e=>{e.preventDefault();ev=e;setTimeout(()=>{s.style.display='flex'},1500)});
+const fb=setTimeout(()=>{if(!ev&&!/iphone|ipad|ipod/i.test(navigator.userAgent)){document.getElementById('instT').innerHTML='Menu ⋮ → <b>Zainstaluj aplikację</b> (jeśli Blob jest już dodany – usuń i dodaj ponownie, by odświeżyć nazwę)';document.getElementById('instB').style.display='none';s.style.display='flex'}},4000);
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();ev=e;clearTimeout(fb);setTimeout(()=>{s.style.display='flex'},1500)});
 addEventListener('appinstalled',hide);
 document.getElementById('instB').onclick=async()=>{if(!ev)return dis();ev.prompt();await ev.userChoice;ev=null;dis()};
 if(/iphone|ipad|ipod/i.test(navigator.userAgent)){document.getElementById('instT').innerHTML='Dotknij <b>Udostępnij</b> ⎙ → <b>Do ekranu głównego</b>';document.getElementById('instB').style.display='none';setTimeout(()=>{s.style.display='flex'},2500)}

@@ -210,7 +210,7 @@ const SFX = (() => {
     unlock: init,
     // map blob drag: s = max synapse tension 0..1 (1 = tears), every frame while held → membrane tone rising a fifth, shivering near the tear
     stretch: ev(s => { if (s < .05) return; const c = cv('str', strV), t = ac.currentTime, k = Math.min(1, s), f = hz(50) * Math.pow(2, 7 * k * k / 12);
-      c.g.gain.setTargetAtTime(.045 * Math.pow(k, 1.5), t, .06); c.a.frequency.setTargetAtTime(f, t, .05); c.b.frequency.setTargetAtTime(f + .5 + 7 * k * k * k, t, .05); c.lp.frequency.setTargetAtTime(260 + 700 * k, t, .06); }),
+      c.g.gain.setTargetAtTime(.045 * Math.pow(k, 1.5), t, .12); c.a.frequency.setTargetAtTime(f, t, .05); c.b.frequency.setTargetAtTime(f + .5 + 7 * k * k * k, t, .05); c.lp.frequency.setTargetAtTime(260 + 700 * k, t, .06); }),
     // a synapse (or the blob) pulled loose: low wet gulp + a short dark puff, panned; no bright drop
     tear: ev((x = .5) => { if (!gate('tear', 120)) return; const p = (x - .5) * 1.2; blp(nt(-3), .08, {pan:p, d:.28}); puff(.05, {pan:p}); hap([4, 25, 8]); }),
     // released blob springs home: pitch settles down from slightly above while a decaying tremolo sways it — like the spring, never a "boing"

@@ -296,7 +296,7 @@ const P0 = {
   // finger in thick water: gentle when slow, strong (can split the core) when fast
   fingerR:28, cutR:15, cutEase:3, cutIn:5, cutOut:1.2, scarLife:2, scarSpeed:2, scarPush:1, cutSpeed:450, cutGap:16, cutImpulse:.06, cutDrag:.04, cutHold:.9, cutHeal:2.2, fragMin:7, maxFrags:30, bondR:18, fragK:30, fragLoose:.3, gapK:50, contact:.5, healRate:4, fragHealK:2.5, healZeta:.38, mergeV:6, mergeD:.6, fastFlee:.25, orbCutSpeed:500, orbSplit:3, orbHeal:2.5, fingerPush:520, fingerDrag:3, fingerFast:900, tearSpeed:1100, tearCool:.15,
   // waves: slow, they stretch shapes instead of moving them
-  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, fps:0, adMin:.55, asHold:1200, ttsEngine:0, coreFollow:.05, grabSharp:9, ripAmp:.6, trlAmp:.55, trlLife:1.4, wkSpeed:85, ripLife:2.4, ripSpeed:170, ripStep:34,
+  waveSpeed:140, waveLen:110, waveLife:3, pinWaveAmp:5, trailAmp:1.2, trailStep:60, landAmp:3, waveKick:0, fps:0, adMin:.55, asHold:650, ttsEngine:0, coreFollow:.05, grabSharp:9, ripAmp:.6, trlAmp:.55, trlLife:1.4, wkSpeed:85, ripLife:2.4, ripSpeed:170, ripStep:34,
   // light
   lightLag:.25, lampH:340, lampZ:70, idleR:1.8, idleT:6, idleBlend:.3, wanderAmp:55, wanderSpeed:.07,
   // thoughts: slow upward stream, critically damped (no bounce)
@@ -574,14 +574,9 @@ function spawnAssistant(p, now) {
   drag = {id:grabP.id, o, x0:p.x, y0:p.y, t0:now, moved:99, lp:0, long:false};
   addWave(CX, CY, P.landAmp); SFX.asBirth(); return o;
 }
-function drawAs(g, L) {
-  const now = performance.now(), lv = TTS.level(now), as = ORBS.find(o => o.asst); let x = 0, y = 0, r = 1, k = 0;
-  if (!(MAP.on && MAP.a > 0)) {
-    if (as && as.x !== null && as.state !== 'gone') { const q = orbPos(as); x = q.x; y = q.y; r = as.r * as.s * 2.4; k = (.6 + .4 * lv) * as.s; }
-    else if (lv > 0) { x = CX; y = CY; r = RR * 1.3; k = .8 * lv; }
-  }
-  g.uniform4f(L.uAs, x, y, r, k);
-}
+function drawAs(g, L) { g.uniform4f(L.uAs, 0, 0, 1, 0); } // tint retired: the assistant is drawn in the core's own field
+let TLV = 0; const ASF = {x:0, y:0}; // push on the assistant from the main blob, summed while the core particles integrate
+ // TTS speaking level 0..1 (smoothed once per frame)
 // liquid ripples on the background (both screens): rings born under a moving finger, fading as they spread
 const RP = [];
 function addRip(x, y, amp) {
@@ -815,7 +810,7 @@ function draw() {
   const L = HV.L;
   g.viewport(0, 0, HV.cv.width, HV.cv.height);
   g.uniform2f(L.uRes, HV.cv.width, HV.cv.height); g.uniform1f(L.uDpr, DPR);
-  g.uniform1f(L.uRim, rimS * P.rimGain); g.uniform1f(L.uGR, grS);
+  g.uniform1f(L.uRim, rimS * P.rimGain * (1 + (ORBS.some(o => o.asst) ? 0 : .5 * TLV))); g.uniform1f(L.uGR, grS);
   g.uniform1f(L.uK, Math.max(.3, P.sharp)); g.uniform1f(L.uNB, HV.NB || 0); g.uniform1f(L.uNM, HV.NM || 0); g.uniform1f(L.uSep, sepAmt); g.uniform1f(L.uEB, Math.max(1.05, P.rimBand)); g.uniform1f(L.uOB, Math.max(1.05, P.orbBand)); g.uniform1f(L.uMW, Math.max(.5, P.rimMinPx)); g.uniform1f(L.uLG, P.lightGain); g.uniform1f(L.uWL, Math.max(10, P.waveLen));
   g.uniform2f(L.uLD, LD[0], LD[1]); g.uniform2f(L.uLP, LP[0], LP[1]); g.uniform1f(L.uLH, P.lampH); g.uniform1f(L.uLZ, P.lampZ);
   g.uniform4fv(L.uB, HV.B); g.uniform4fv(L.uM, HV.M); g.uniform1fv(L.uPin, HV.PN); g.uniform4fv(L.uS, HV.S); g.uniform4fv(L.uSR, HV.SR); g.uniform1f(L.uNS, HV.NS || 0); g.uniform1f(L.uSF, P.synFill ? P.synFillI : 0); g.uniform2f(L.uSSm, P.synSoftLo, P.synSoftHi);
@@ -1086,7 +1081,8 @@ function frame(now) {
   let tx = 0, ty = 0;
   if (hold) { const dx = PX - HX, dy = PY - HY, d = Math.hypot(dx, dy) || 1, s2 = Math.min(1, P.followMax / d); tx = dx * s2 * P.coreFollow; ty = dy * s2 * P.coreFollow; }
   springXY(QX, tx, 60, 12, dt); springXY(QY, ty, 60, 12, dt);
-  const cx = HX + QX.p, cy = HY + QY.p, R = 72 * sc.x * (1 + .025 * (2 * br - 1));
+  TLV = TTS.level(now); const ASO = ORBS.find(o => o.asst); ASF.x = ASF.y = 0;
+  const cx = HX + QX.p, cy = HY + QY.p, R = 72 * sc.x * (1 + .025 * (2 * br - 1)) * (1 + (ASO ? 0 : .07 * TLV));
   CX = cx; CY = cy; RR = R;
 
   // light: direction to pointer, wander near the core, smoothed as a vector; never audio-driven (FROM home9)
@@ -1177,6 +1173,7 @@ function frame(now) {
       const L0 = Math.hypot(c.tx - o.tx, c.ty - o.ty), dx = o.x - c.x, dy = o.y - c.y, d = Math.hypot(dx, dy) || 1;
       if (d > L0) { const f = P.kLink * (hold ? P.grabLoose : 1) * (d - L0) / d; c.ax += dx * f; c.ay += dy * f; }
     }
+    if (ASO && ASO.x !== null && ASO.state !== 'gone') { const dx = c.x - ASO.x, dy = c.y - ASO.y, d = Math.hypot(dx, dy) || 1, rr = c.r + ASO.r * ASO.s * 1.1 + 8; if (d < rr) { const f = (rr - d) * k * 1.5; c.ax += dx / d * f; c.ay += dy / d * f; const m = c.r * c.r / (R * R); ASF.x -= dx / d * f * m * 2; ASF.y -= dy / d * f * m * 2; } }
     if (fing) fingerForce(c, c.r, fastK);
     { const dx = c.x - PX, dy = c.y - PY, d = Math.hypot(dx, dy) || 1, dm = (P.cutR + c.r) * cutS; if (d < dm) { c.ax += dx / d * (dm - d) * k * 2; c.ay += dy / d * (dm - d) * k * 2; } }
     if (hold) {
@@ -1225,6 +1222,11 @@ function frame(now) {
     hb.push([q.x, q.y, q.r, q.g * 2 + Math.min(lw, 1)]);
   }
   for (const d of DR) hb.push([d.x, d.y, d.r, P.dropLight]);
+  if (ASO && ASO.x !== null && ASO.state !== 'gone' && ASO.state !== 'merge') { // the assistant: same field/material as the core, smaller, breathing harder and rippling
+    const q = orbPos(ASO), ar = ASO.r * ASO.s * 1.25, sp = 1 + .1 * Math.sin(T * TAU / 3 + ASO.ph) + .03 * Math.sin(T * 5.1) + .3 * TLV * (.6 + .4 * Math.sin(T * 17)), g7 = 15;
+    hb.push([q.x, q.y, ar * .85 * sp, g7]);
+    for (let k = 0; k < 3; k++) { const an = T * .55 + k * 2.094 + ASO.ph, wb = .5 + .18 * Math.sin(T * 1.4 + k * 1.9) + .25 * TLV * Math.sin(T * 13 + k); hb.push([q.x + Math.cos(an) * ar * wb, q.y + Math.sin(an) * ar * wb, ar * (.42 + .08 * Math.sin(T * 1.9 + k * 2.3)) * sp, g7]); }
+  }
   BP = null;
   for (const o of ORBS) {
     if (o.state !== 'arrive' || o.x === null) { o.bf = 0; continue; }
@@ -1296,6 +1298,12 @@ function frame(now) {
     if (o.state === 'back') { o.s = Math.min(1, (now - o.goneT) / 300); if (o.s >= 1) o.state = 'ok'; }
     if (o.x === null) { o.x = hx; o.y = hy; }
     if (o.grab && o.gx !== undefined) { o.ax += (o.gx - o.x) * 120 - o.vx * 16; o.ay += (o.gy - o.y) * 120 - o.vy * 16; }
+    else if (o.asst) {
+      o.ax += ASF.x - o.vx * P.pinFric * .6 + (o.px - o.x) * 3 + 40 * vnoise(T * .17 + o.ph * 3); o.ay += ASF.y - o.vy * P.pinFric * .6 + (o.py - o.y) * 3 + 40 * vnoise(T * .13 + o.ph * 5 + 9);
+      const dx = o.x - CX, dy = o.y - CY, d = Math.hypot(dx, dy) || 1, dm = RR + o.r * 1.3;
+      if (d < dm) { o.ax += dx / d * (dm - d) * 14; o.ay += dy / d * (dm - d) * 14; }
+      const m = o.r + 10; if (o.x < m) o.ax += (m - o.x) * 6; if (o.x > W - m) o.ax -= (o.x - W + m) * 6; if (o.y < m) o.ay += (m - o.y) * 6; if (o.y > H - m) o.ay -= (o.y - H + m) * 6;
+    }
     else if (o.pinned) {
       o.ax -= o.vx * P.pinFric; o.ay -= o.vy * P.pinFric;
       const dx = o.x - CX, dy = o.y - CY, d = Math.hypot(dx, dy) || 1, dm = RR * 1.3 + o.r;
@@ -1363,7 +1371,7 @@ function frame(now) {
   let k = 0, gk = 0;
   for (let pass = 0; pass < 2; pass++) for (const o of ORBS) {
     if (o.pinned !== (pass === 0)) continue;
-    if (o.state === 'gone' || (o.state === 'merge' && o.s <= 0) || o.x === null || k >= 24) continue;
+    if (o.state === 'gone' || (o.state === 'merge' && o.s <= 0) || o.x === null || k >= 24 || o.asst) continue;
     const q = orbPos(o), rr = o.r * o.s * (1 - (o.bf || 0)), ef = clamp((q.y + o.r) / (P.edgeFade * H), 0, 1), cl = o.detT ? 1 - clamp((now - o.detT) / (P.birthDim * 1000), 0, 1) : 0, kI = P.orbLevel * o.rs * o.dim + (1 - P.orbLevel * o.rs * o.dim) * cl * cl * (3 - 2 * cl), w = (kI * vis + (o.pinned ? P.pinRim : 0)) * ef * ef * (3 - 2 * ef) * (1 - (o.bf || 0)), sh = 40 * (1 - vis);
     const sm = Math.min(1, Math.hypot(o.cx2, o.cy2) / Math.max(1, o.r)), ra = 1 - .25 * sm;
     M.set([q.x + o.cx2, q.y + o.cy2, rr * ra, w], k * 8); M.set([o.qx - o.cx2 * (1 - .5 * (1 - sm)), o.qy + sh - o.cy2 * (1 - .5 * (1 - sm)), rr * (.8 + .2 * sm) * ra, w], k * 8 + 4);

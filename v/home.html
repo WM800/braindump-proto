@@ -148,6 +148,14 @@ const SFX = (() => {
     for (const [m, a, ty] of [[50, 1, 'sine'], [57, .5, 'triangle'], [62, .3, 'sine'], [69, .12, 'triangle']]) { const k = ac.createGain(); k.gain.value = a; k.connect(lp); const o = ac.createOscillator(); o.type = ty; o.frequency.value = hz(m); o.connect(k); o.start(); os.push(o); }
     return {g, lp, os};
   }
+  // stretch: two close sines beating faster as the pull grows (tension without a hard edge)
+  function strV() {
+    const g = ac.createGain(), lp = ac.createBiquadFilter(), v = vout(.3), a = ac.createOscillator(), b = ac.createOscillator();
+    g.gain.value = 0; lp.type = 'lowpass'; lp.Q.value = .5; lp.frequency.value = 400; a.type = 'sine'; b.type = 'triangle'; a.frequency.value = b.frequency.value = hz(50);
+    const bg = ac.createGain(); bg.gain.value = .4; a.connect(lp); b.connect(bg); bg.connect(lp); lp.connect(g); g.connect(v); a.start(); b.start();
+    return {g, lp, a, b};
+  }
+  const SYN = {n:0, t:0}; // leaky count of recent synapse voices (cascade cap)
   // split/join ladder: quick successive splits climb the scale, joins step back down — a little melody you play with the blob
   let lad = 0, ladT = 0;
   const step = dir => { const n = performance.now(); if (n - ladT > 2200) lad = 0; ladT = n; lad = Math.max(-3, Math.min(10, lad + dir)); return lad; };
@@ -184,7 +192,24 @@ const SFX = (() => {
 
   return {
     unlock: init,
-    tear() {}, snapBack() {}, ripple() {}, // hooks for the sound session: blob torn from its place / sprung back / background ripple born
+    // map blob drag: s = stretch 0..1+ (called every frame while held) → soft wet tension, pitch and beating rise with the pull
+    stretch: ev(s => { if (s < .04) return; const c = cv('str', strV), t = ac.currentTime, k = Math.min(1.2, s);
+      c.g.gain.setTargetAtTime(.05 * Math.sqrt(k), t, .05); c.a.frequency.setTargetAtTime(hz(50) * (1 + .5 * k), t, .06); c.b.frequency.setTargetAtTime(hz(50) * (1 + .5 * k) + 1 + 6 * k, t, .06); c.lp.frequency.setTargetAtTime(300 + 900 * k, t, .06); }),
+    // the blob pulled loose from its place: wet two-part release (low gulp + bright drop), panned
+    tear: ev((x = .5) => { if (!gate('tear', 150)) return; blp(nt(-3), .09, {pan:(x - .5) * 1.2}); pip(nt(4 + Math.floor(R() * 3)), .07, {at:.05, pan:(x - .5) * 1.2}); hap([4, 25, 8]); }),
+    // released blob springs home: sine whose pitch wobbles and settles like the spring (bigger stretch = wider, longer)
+    snapBack: ev((s = .5) => { if (!gate('snap', 90)) return; const k = Math.min(1.5, s), t = ac.currentTime, d = .45 + .35 * k, f = nt(Math.round(2 - k * 2)), v = vout(.35), lp = ac.createBiquadFilter(), w = ac.createOscillator(), wg = ac.createGain();
+      v.gain.setValueAtTime(0, t); v.gain.linearRampToValueAtTime(vg(.09), t + .015); v.gain.setTargetAtTime(0, t + .015, d / 4);
+      lp.type = 'lowpass'; lp.frequency.value = f * 2; lp.connect(v); w.frequency.value = 7 + 3 * R(); wg.gain.setValueAtTime(f * .07 * k, t); wg.gain.setTargetAtTime(0, t, d / 3); w.connect(wg);
+      const o = osc('sine', f, t, t + d * 1.4, lp); wg.connect(o.frequency); w.start(t); w.stop(t + d * 1.4); sub(hz(45), .08 * k, {d:.25, dr:1.2}); hap(5); }),
+    // a ring born on the liquid background: barely-there droplet texture on top of the finger wash
+    ripple: ev((amp = .5) => { if (recOn || !gate('rip', 70)) return; pip(nt(7 + Math.floor(R() * 6)), .012 + .022 * amp, {d:.12, wet:.5, pan:(R() - .5) * .8}); }),
+    // synapse finished regrowing: q = regrow time (ms) — fast = higher + shorter; s = strength (stronger = warmer); x = screen 0..1
+    synapse: ev((q = 1600, s = .5, x = .5) => { const n = performance.now(); SYN.n = Math.max(0, SYN.n - (n - SYN.t) / 90) + 1; SYN.t = n; if (SYN.n > 6 || !gate('syn', 28)) return; // burst up to 6, then ~1 per 90 ms
+      const fast = Math.max(0, Math.min(1, 1 - (q - 700) / 2600)), k = 3 + Math.round(fast * 6) + (R() < .3 ? 1 : 0), d = .12 + .25 * (1 - fast);
+      pip(nt(k), .03 + .035 * s, {d, wet:.35, pan:(x - .5) * 1.2}); if (s > .6) syn(nt(k - 5), .04, {d:.5, br:.1}); }),
+    // switching screens with two fingers: long soft dark whoosh, up = into the map, down = back home
+    whoosh: ev(up => { if (!gate('whoosh', 300)) return; air(up, .028, {d:.75, wet:.45}); hap(3); }),
     get music() { return musOn; },
     toggleMusic: ev(() => { musOn = !musOn; try { localStorage.setItem('bd_music', musOn ? '1' : '0'); } catch (e) {} if (musOn) musStart(); else musStop(); syn(nt(musOn ? 7 : 2), .25, {d:.8}); hap(6); }),
     recStart: ev(() => { recOn = true; duck(true); sub(hz(38), .55, {d:.5}); plop(nt(0), .35, {up:1.5, d:.12, at:.02}); hap(16); }),
@@ -625,7 +650,7 @@ window.addEventListener('pointermove', e => {
   const p = pt(e); PX = p.x; PY = p.y; lastIn = performance.now();
   if (two && pts.size === 2) {
     const v = [...pts.values()], mx = (v[0].x + v[1].x) / 2, my = (v[0].y + v[1].y) / 2; two.moved = Math.max(two.moved, Math.hypot(mx - two.mx0, my - two.my0));
-    if (!two.nav && two.my0 < H * .6 && my - two.my0 > 24 && Math.abs(mx - two.mx0) < (my - two.my0) * .7) { two.nav = true; mapEnter(performance.now(), true); SFX.pull(); MAP.pull = {id:e.pointerId, y0:p.y, t:performance.now(), v:0}; return; }
+    if (!two.nav && two.my0 < H * .6 && my - two.my0 > 24 && Math.abs(mx - two.mx0) < (my - two.my0) * .7) { two.nav = true; mapEnter(performance.now(), true); SFX.whoosh(true); MAP.pull = {id:e.pointerId, y0:p.y, t:performance.now(), v:0}; return; }
   }
   if (swipe && e.pointerId === swipe.id) {
     swipe.acc += Math.hypot(p.x - swipe.lx, p.y - swipe.ly); swipe.lx = p.x; swipe.ly = p.y;
@@ -1318,8 +1343,8 @@ function mapPhys(dt, settle) {
     // the finger pulls through a rubber band: the farther it goes the less the blob follows, while synapses and the rest spring pull back harder
     const n = dn.n, c = MAP.cam, tx = (dn.gx - c.x) / c.z + dn.ox, ty = (dn.gy - c.y) / c.z + dn.oy, dx = tx - n.x, dy = ty - n.y, m = Math.max(.01, Math.hypot(dx, dy)), lim = Math.max(10, P.mapDragMax), e = lim * Math.tanh(m / lim);
     n.ax += dx / m * e * P.mapDragK; n.ay += dy / m * e * P.mapDragK;
-    dn.str = Math.hypot(n.x - n.rx, n.y - n.ry); dn.maxStr = Math.max(dn.maxStr, dn.str);
-    if (!dn.tore && dn.str > lim * .7) { dn.tore = true; SFX.tear(); }
+    dn.str = Math.hypot(n.x - n.rx, n.y - n.ry); dn.maxStr = Math.max(dn.maxStr, dn.str); SFX.stretch(dn.str / lim);
+    if (!dn.tore && dn.str > lim * .7) { dn.tore = true; SFX.tear(dn.gx / W); }
   }
   for (let i = 0; i < N.length; i++) for (let j = i + 1; j < N.length; j++) {
     const A = N[i], B = N[j], dx = B.x - A.x, dy = B.y - A.y, d2 = dx * dx + dy * dy;
@@ -1379,7 +1404,7 @@ function mapMove(e) {
   if (MAP.dir < 0) return;
   if (MAP.pinch && MAP.pts.size >= 2) {
     const [a, b] = [...MAP.pts.values()], pc = MAP.pinch, d = Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, dtm = Math.max(1, now - (pc.t || now - 16));
-    if (pc.my0 > H * .78 && pc.my0 - my > 24 && Math.abs(mx - pc.mx0) < (pc.my0 - my) * .7 && Math.abs(d - pc.d0) < 60) { MAP.back2 = {id:e.pointerId, y0:p.y, t:now, v:0}; MAP.dir = 0; MAP.lab = null; MAP.pinch = null; MAP.vel = [0, 0]; return; } // two fingers up from the bottom = home
+    if (pc.my0 > H * .78 && pc.my0 - my > 24 && Math.abs(mx - pc.mx0) < (pc.my0 - my) * .7 && Math.abs(d - pc.d0) < 60) { SFX.whoosh(false); MAP.back2 = {id:e.pointerId, y0:p.y, t:now, v:0}; MAP.dir = 0; MAP.lab = null; MAP.pinch = null; MAP.vel = [0, 0]; return; } // two fingers up from the bottom = home
     MAP.cam.x += mx - pc.mx; MAP.cam.y += my - pc.my; mapZoomAt(d / pc.d, mx, my);
     MAP.vel = [(mx - pc.mx) / dtm * 600 + MAP.vel[0] * .4, (my - pc.my) / dtm * 600 + MAP.vel[1] * .4];
     pc.d = d; pc.mx = mx; pc.my = my; pc.t = now; return;
@@ -1506,7 +1531,7 @@ function mapFrame(now) {
     if (l.st === 'cut') {
       const e = sm5((now - l.tc) / (Math.max(.1, P.synRetract) * 1000)), sa = Math.min(.45, pa.r * .8 / d), sb = Math.min(.45, pb.r * .8 / d);
       const reg = P.synRegrow > 0 ? sm5(Math.pow(clamp((now - l.tc - (l.rd || 0)) / (l.rl || 1600), 0, 1), l.rc || 1)) : 0;
-      if (reg >= 1) l.st = 'ok';
+      if (reg >= 1) { l.st = 'ok'; SFX.synapse(l.rl || 1600, l.s || .5, w2s((l.a.x + l.b.x) / 2, (l.a.y + l.b.y) / 2)[0] / W); }
       else { const a0 = l.u + (sa - l.u) * e, b0 = l.u + (1 - sb - l.u) * e; ta = a0 + (.5 - a0) * reg; tb = b0 + (.5 - b0) * reg; }
     }
     if (l.st === 'cut') { const a = at(Math.max(ea, ta)), b = at(Math.min(eb, tb)); seg(A0[0], A0[1], a[0], a[1], rw, w); seg(b[0], b[1], B0[0], B0[1], rw, w); }

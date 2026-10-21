@@ -11,6 +11,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="apple-touch-startup-image" href="splash-1170x2532.png" media="(device-width:390px) and (device-height:844px) and (-webkit-device-pixel-ratio:3)">
+<link rel="apple-touch-startup-image" href="splash-1290x2796.png" media="(device-width:430px) and (device-height:932px) and (-webkit-device-pixel-ratio:3)">
+<link rel="apple-touch-startup-image" href="splash-750x1334.png" media="(device-width:375px) and (device-height:667px) and (-webkit-device-pixel-ratio:2)">
 <title>Podglad</title>
 <style>
 html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #111; }
@@ -28,6 +31,7 @@ iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 
 </style>
 </head>
 <body>
+<div id="boot" style="position:fixed;inset:0;z-index:99999;background:#000 url(icon-maskable-512.png) center/min(60vw,320px) no-repeat;transition:opacity .6s;pointer-events:none"></div>
 <iframe id="frame" title="design"></iframe>
 <button id="dev" aria-label="Panel">&#9679;</button>
 <div id="panel">
@@ -163,5 +167,6 @@ iframe { position: fixed; left: 0; top: 0; width: 100%; height: 100dvh; border: 
   } else startPoll();
 })();
 </script>
+<script>addEventListener("load",()=>setTimeout(()=>{const b=document.getElementById("boot");b.style.opacity=0;setTimeout(()=>b.remove(),700)},250))</script>
 </body>
 </html>
